@@ -4762,7 +4762,7 @@ gdk_win32_toplevel_class_init (GdkWin32ToplevelClass *class)
   gdk_toplevel_install_properties (object_class, 1);
 }
 
-static gboolean
+static void
 gdk_win32_toplevel_present (GdkToplevel       *toplevel,
                             GdkToplevelLayout *layout)
 {
@@ -4842,8 +4842,6 @@ gdk_win32_toplevel_present (GdkToplevel       *toplevel,
                                           size.shadow.top,
                                           size.shadow.bottom);
     }
-
-  return TRUE;
 }
 
 static gboolean
