@@ -176,6 +176,10 @@ gsk_next_driver_begin_frame (GskNextDriver *self)
 
   self->in_frame = TRUE;
 
+  gsk_gl_texture_library_begin_frame (GSK_GL_TEXTURE_LIBRARY (self->icons));
+  gsk_gl_texture_library_begin_frame (GSK_GL_TEXTURE_LIBRARY (self->glyphs));
+  gsk_gl_texture_library_begin_frame (GSK_GL_TEXTURE_LIBRARY (self->shadows));
+
   gsk_gl_command_queue_begin_frame (self->command_queue);
 }
 
@@ -186,6 +190,10 @@ gsk_next_driver_end_frame (GskNextDriver *self)
   g_return_if_fail (self->in_frame == TRUE);
 
   gsk_gl_command_queue_end_frame (self->command_queue);
+
+  gsk_gl_texture_library_end_frame (GSK_GL_TEXTURE_LIBRARY (self->icons));
+  gsk_gl_texture_library_end_frame (GSK_GL_TEXTURE_LIBRARY (self->glyphs));
+  gsk_gl_texture_library_end_frame (GSK_GL_TEXTURE_LIBRARY (self->shadows));
 
   self->in_frame = FALSE;
 }
