@@ -148,8 +148,9 @@ typedef struct _GskGLCommandBatch
     GskGLCommandUniform *uniforms;
   };
 
+  guint is_clear : 1;
   guint program_changed : 1;
-  guint program : 15;
+  guint program : 14;
   guint n_draws : 16;
   guint n_binds : 16;
   guint n_uniforms : 16;
@@ -410,7 +411,12 @@ gsk_gl_command_batch_execute (GskGLCommandBatch *batch,
         }
     }
 
-  if (batch->n_draws == 1)
+  if (batch->is_clear)
+    {
+      glClearColor (0, 0, 0, 0);
+      glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    }
+  else if (batch->n_draws == 1)
     {
       glDrawArrays (GL_TRIANGLES, batch->draw.vao_offset, batch->draw.vao_count);
     }
@@ -569,6 +575,14 @@ gsk_gl_command_queue_advance (GskGLCommandQueue *self,
     gsk_gl_command_queue_try_merge (self, last_batch);
 
   return g_steal_pointer (&batch);
+}
+
+static inline gboolean
+gsk_gl_command_queue_batch_is_complete (GskGLCommandQueue *self)
+{
+  GskGLCommandBatch *batch = gsk_gl_command_queue_get_batch (self);
+
+  return batch->is_clear || (batch->program && batch->n_draws > 0);
 }
 
 static void
@@ -1209,4 +1223,22 @@ gsk_gl_command_queue_autorelease_texture (GskGLCommandQueue *self,
   g_return_if_fail (texture_id > 0);
 
   g_array_append_val (self->autorelease_textures, texture_id);
+}
+
+void
+gsk_gl_command_queue_clear (GskGLCommandQueue *self)
+{
+  GskGLCommandBatch *batch;
+
+  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+
+  batch = gsk_gl_command_queue_get_batch (self);
+
+  if (batch->is_clear)
+    return;
+
+  if (gsk_gl_command_queue_batch_is_complete (self))
+    batch = gsk_gl_command_queue_advance (self, 0);
+
+  batch->is_clear = TRUE;
 }

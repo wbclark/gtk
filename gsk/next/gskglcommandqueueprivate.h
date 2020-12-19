@@ -59,6 +59,7 @@ void               gsk_gl_command_queue_use_program              (GskGLCommandQu
                                                                   guint                     program_id);
 void               gsk_gl_command_queue_bind_framebuffer         (GskGLCommandQueue        *self,
                                                                   guint                     framebuffer);
+void               gsk_gl_command_queue_clear                    (GskGLCommandQueue        *self);
 void               gsk_gl_command_queue_set_uniform1i            (GskGLCommandQueue        *self,
                                                                   guint                     program,
                                                                   guint                     location,
