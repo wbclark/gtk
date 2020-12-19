@@ -39,6 +39,7 @@
 #include "gskcairorenderer.h"
 #include "gskdebugprivate.h"
 #include "gl/gskglrenderer.h"
+#include "next/gskglrenderer.h"
 #include "gskprofilerprivate.h"
 #include "gskrendernodeprivate.h"
 
@@ -496,6 +497,8 @@ get_renderer_for_name (const char *renderer_name)
   else if (g_ascii_strcasecmp (renderer_name, "opengl") == 0
            || g_ascii_strcasecmp (renderer_name, "gl") == 0)
     return GSK_TYPE_GL_RENDERER;
+  else if (g_ascii_strcasecmp (renderer_name, "next") == 0)
+    return GSK_TYPE_NEXT_RENDERER;
 #ifdef GDK_RENDERING_VULKAN
   else if (g_ascii_strcasecmp (renderer_name, "vulkan") == 0)
     return GSK_TYPE_VULKAN_RENDERER;

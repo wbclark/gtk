@@ -31,6 +31,7 @@ gsk_public_sources = files([
   'gskroundedrect.c',
   'gsktransform.c',
   'gl/gskglrenderer.c',
+  'next/gskglrenderer.c',
 ])
 
 gsk_private_sources = files([
@@ -48,6 +49,19 @@ gsk_private_sources = files([
   'gl/gskgliconcache.c',
   'gl/opbuffer.c',
   'gl/stb_rect_pack.c',
+  'next/gskglattachmentstate.c',
+  'next/gskglbuffer.c',
+  'next/gskglcommandqueue.c',
+  'next/gskglcompiler.c',
+  'next/gskgldriver.c',
+  'next/gskglglyphlibrary.c',
+  'next/gskgliconlibrary.c',
+  'next/gskglprogram.c',
+  'next/gskglrenderjob.c',
+  'next/gskglshadowlibrary.c',
+  'next/gskgltextureatlas.c',
+  'next/gskgltexturelibrary.c',
+  'next/gskgluniformstate.c',
 ])
 
 gsk_public_headers = files([
@@ -64,7 +78,8 @@ gsk_public_headers = files([
 install_headers(gsk_public_headers, 'gsk.h', subdir: 'gtk-4.0/gsk')
 
 gsk_public_gl_headers = files([
-  'gl/gskglrenderer.h'
+  'gl/gskglrenderer.h',
+  'next/gskglrenderer.h',
 ])
 install_headers(gsk_public_gl_headers, subdir: 'gtk-4.0/gsk/gl')
 gsk_public_headers += gsk_public_gl_headers
