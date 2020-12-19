@@ -56,6 +56,14 @@ typedef struct _GskGLRenderModelview
 } GskGLRenderModelview;
 
 static void
+gsk_gl_render_modelview_clear (gpointer data)
+{
+  GskGLRenderModelview *modelview = data;
+
+  g_clear_pointer (&modelview->transform, gsk_transform_unref);
+}
+
+static void
 init_projection_matrix (graphene_matrix_t     *projection,
                         const graphene_rect_t *viewport,
                         gboolean               flip_y)
@@ -70,6 +78,55 @@ init_projection_matrix (graphene_matrix_t     *projection,
 
   if (!flip_y)
     graphene_matrix_scale (projection, 1, -1, 1);
+}
+
+static void
+gsk_gl_render_job_push_modelview (GskGLRenderJob *job,
+                                  GskTransform   *transform)
+{
+  GskGLRenderModelview modelview = { transform, 0 };
+
+  g_assert (job != NULL);
+  g_assert (job->modelview != NULL);
+  g_assert (transform != NULL || job->modelview->len > 0);
+
+  if G_LIKELY (job->modelview->len > 0)
+    {
+      GskGLRenderModelview *last;
+
+      last = &g_array_index (job->modelview,
+                             GskGLRenderModelview,
+                             job->modelview->len - 1);
+
+      if (transform == NULL || gsk_transform_equal (transform, last->transform))
+        {
+          last->n_repeated++;
+          return;
+        }
+    }
+
+  g_assert (transform != NULL);
+
+  g_array_append_val (job->modelview, modelview);
+}
+
+static void
+gsk_gl_render_job_pop_modelview (GskGLRenderJob *job)
+{
+  GskGLRenderModelview *modelview;
+
+  g_assert (job != NULL);
+  g_assert (job->modelview != NULL);
+  g_assert (job->modelview->len > 0);
+
+  modelview = &g_array_index (job->modelview,
+                              GskGLRenderModelview,
+                              job->modelview->len - 1);
+
+  if (modelview->n_repeated == 0)
+    job->modelview->len--;
+  else
+    modelview->n_repeated--;
 }
 
 GskGLRenderJob *
@@ -91,13 +148,18 @@ gsk_gl_render_job_new (GskNextDriver         *driver,
   job = g_slice_new0 (GskGLRenderJob);
   job->driver = g_object_ref (driver);
   job->root = gsk_render_node_ref (root);
-  job->modelview = g_array_new (FALSE, FALSE, sizeof (GskGLRenderModelview));
   job->clip = g_array_new (FALSE, FALSE, sizeof (GskGLRenderClip));
   job->framebuffer = framebuffer;
   job->scale_factor = scale_factor;
   job->viewport = *viewport;
   job->region = region ? cairo_region_copy (region) : NULL;
   job->flip_y = !!flip_y;
+
+  init_projection_matrix (&job->projection, viewport, flip_y);
+
+  job->modelview = g_array_new (FALSE, FALSE, sizeof (GskGLRenderModelview));
+  g_array_set_clear_func (job->modelview, gsk_gl_render_modelview_clear);
+  gsk_gl_render_job_push_modelview (job, gsk_transform_scale (NULL, scale_factor, scale_factor));
 
   return job;
 }
