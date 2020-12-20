@@ -149,7 +149,6 @@ gsk_gl_render_job_set_modelview (GskGLRenderJob *job,
 
   g_assert (job != NULL);
   g_assert (job->modelview != NULL);
-  g_assert (transform != NULL);
 
   g_array_set_size (job->modelview, job->modelview->len + 1);
 
