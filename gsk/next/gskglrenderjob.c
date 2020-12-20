@@ -42,8 +42,8 @@ struct _GskGLRenderJob
   graphene_matrix_t  projection;
   GArray            *modelview;
   GArray            *clip;
-  float              dx;
-  float              dy;
+  float              offset_x;
+  float              offset_y;
   float              scale_x;
   float              scale_y;
   guint              flip_y : 1;
@@ -60,17 +60,9 @@ typedef struct _GskGLRenderModelview
   GskTransform *transform;
   float scale_x;
   float scale_y;
-  float dx_before;
-  float dy_before;
+  float offset_x_before;
+  float offset_y_before;
 } GskGLRenderModelview;
-
-static void
-gsk_gl_render_modelview_clear (gpointer data)
-{
-  GskGLRenderModelview *modelview = data;
-
-  g_clear_pointer (&modelview->transform, gsk_transform_unref);
-}
 
 static void
 init_projection_matrix (graphene_matrix_t     *projection,
@@ -145,7 +137,7 @@ extract_matrix_metadata (GskGLRenderModelview *modelview)
       break;
 
     default:
-      {}
+      break;
     }
 }
 
@@ -167,13 +159,13 @@ gsk_gl_render_job_set_modelview (GskGLRenderJob *job,
 
   modelview->transform = transform;
 
-  modelview->dx_before = job->dx;
-  modelview->dy_before = job->dy;
+  modelview->offset_x_before = job->offset_x;
+  modelview->offset_y_before = job->offset_y;
 
   extract_matrix_metadata (modelview);
 
-  job->dx = 0;
-  job->dy = 0;
+  job->offset_x = 0;
+  job->offset_y = 0;
   job->scale_x = modelview->scale_x;
   job->scale_y = modelview->scale_y;
 }
@@ -205,7 +197,10 @@ gsk_gl_render_job_push_modelview (GskGLRenderJob *job,
 
       /* Multiply given matrix with our previews modelview */
       t = gsk_transform_translate (gsk_transform_ref (last->transform),
-                                   &(graphene_point_t) { job->dx, job->dy});
+                                   &(graphene_point_t) {
+                                     job->offset_x,
+                                     job->offset_y
+                                   });
       t = gsk_transform_transform (t, transform);
       modelview->transform = t;
     }
@@ -214,13 +209,13 @@ gsk_gl_render_job_push_modelview (GskGLRenderJob *job,
       modelview->transform = gsk_transform_ref (transform);
     }
 
-  modelview->dx_before = job->dx;
-  modelview->dy_before = job->dy;
+  modelview->offset_x_before = job->offset_x;
+  modelview->offset_y_before = job->offset_y;
 
   extract_matrix_metadata (modelview);
 
-  job->dx = 0;
-  job->dy = 0;
+  job->offset_x = 0;
+  job->offset_y = 0;
   job->scale_x = job->scale_x;
   job->scale_y = job->scale_y;
 }
@@ -236,8 +231,8 @@ gsk_gl_render_job_pop_modelview (GskGLRenderJob *job)
 
   head = gsk_gl_render_job_get_modelview (job);
 
-  job->dx = head->dx_before;
-  job->dy = head->dy_before;
+  job->offset_x = head->offset_x_before;
+  job->offset_y = head->offset_y_before;
 
   gsk_transform_unref (head->transform);
 
@@ -280,6 +275,17 @@ gsk_gl_render_job_pop_clip (GskGLRenderJob *job)
 }
 
 static void
+gsk_gl_render_job_offset (GskGLRenderJob *job,
+                          float           offset_x,
+                          float           offset_y)
+{
+  g_assert (job != NULL);
+
+  job->offset_x += offset_x;
+  job->offset_y += offset_y;
+}
+
+static void
 gsk_gl_render_job_transform_bounds (GskGLRenderJob        *job,
                                     const graphene_rect_t *rect,
                                     graphene_rect_t       *out_rect)
@@ -290,8 +296,8 @@ gsk_gl_render_job_transform_bounds (GskGLRenderJob        *job,
   g_assert (job != NULL);
   g_assert (rect != NULL);
 
-  r.origin.x = rect->origin.x + job->dx;
-  r.origin.y = rect->origin.y + job->dy;
+  r.origin.x = rect->origin.x + job->offset_x;
+  r.origin.y = rect->origin.y + job->offset_y;
   r.size.width = rect->size.width;
   r.size.height = rect->size.width;
 
@@ -324,12 +330,12 @@ gsk_gl_render_job_new (GskNextDriver         *driver,
   job->clip = g_array_new (FALSE, FALSE, sizeof (GskGLRenderClip));
   job->modelview = g_array_new (FALSE, FALSE, sizeof (GskGLRenderModelview));
   job->framebuffer = framebuffer;
+  job->offset_x = 0;
+  job->offset_y = 0;
   job->scale_x = scale_factor;
   job->scale_y = scale_factor;
   job->viewport = *viewport;
   job->region = region ? cairo_region_copy (region) : NULL;
-  job->dx = 0;
-  job->dy = 0;
   job->flip_y = !!flip_y;
 
   init_projection_matrix (&job->projection, viewport, flip_y);
@@ -367,6 +373,13 @@ gsk_gl_render_job_new (GskNextDriver         *driver,
 void
 gsk_gl_render_job_free (GskGLRenderJob *job)
 {
+  while (job->modelview->len > 0)
+    {
+      GskGLRenderModelview *modelview = gsk_gl_render_job_get_modelview (job);
+      g_clear_pointer (&modelview->transform, gsk_transform_unref);
+      job->modelview->len--;
+    }
+
   g_clear_object (&job->driver);
   g_clear_pointer (&job->root, gsk_render_node_unref);
   g_clear_pointer (&job->region, cairo_region_destroy);
