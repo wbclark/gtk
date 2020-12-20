@@ -24,6 +24,7 @@
 #include "config.h"
 
 #include <gdk/gdkglcontextprivate.h>
+#include <math.h>
 #include <string.h>
 
 #include "gskglcommandqueueprivate.h"
@@ -362,8 +363,6 @@ gsk_gl_render_job_new (GskNextDriver         *driver,
                                                        clip_rect->size.width,
                                                        clip_rect->size.height));
 
-  gsk_gl_command_queue_bind_framebuffer (driver->command_queue, framebuffer);
-
   return job;
 }
 
@@ -388,6 +387,7 @@ void
 gsk_gl_render_job_prepare (GskGLRenderJob *job,
                            GskRenderNode  *root)
 {
+  GskGLCommandQueue *command_queue;
   GdkGLContext *context;
 
   g_return_if_fail (job != NULL);
@@ -395,8 +395,14 @@ gsk_gl_render_job_prepare (GskGLRenderJob *job,
   g_return_if_fail (GSK_IS_NEXT_DRIVER (job->driver));
 
   context = gsk_next_driver_get_context (job->driver);
+  command_queue = job->driver->command_queue;
 
   gdk_gl_context_push_debug_group (context, "Adding render ops");
+
+  gsk_gl_command_queue_bind_framebuffer (command_queue, job->framebuffer);
+  gsk_gl_command_queue_set_viewport (command_queue, &job->viewport);
+  gsk_gl_command_queue_clear (command_queue);
+
   gdk_gl_context_pop_debug_group (context);
 }
 
@@ -407,5 +413,6 @@ gsk_gl_render_job_render (GskGLRenderJob *job)
   g_return_if_fail (GSK_IS_NEXT_DRIVER (job->driver));
 
   gsk_next_driver_begin_frame (job->driver);
+  gsk_gl_command_queue_execute (job->driver->command_queue);
   gsk_next_driver_end_frame (job->driver);
 }
