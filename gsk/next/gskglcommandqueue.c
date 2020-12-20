@@ -979,7 +979,7 @@ gsk_gl_command_queue_set_uniform_rounded_rect (GskGLCommandQueue    *self,
  *
  * Executes all of the batches in the command queue.
  */
-static void
+void
 gsk_gl_command_queue_execute (GskGLCommandQueue *self)
 {
   GskGLCommandBatch *last_batch;
@@ -998,6 +998,14 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
     gsk_gl_command_queue_advance (self, 0);
 
   gsk_gl_command_queue_make_current (self);
+
+  glEnable (GL_DEPTH_TEST);
+  glDepthFunc (GL_LEQUAL);
+
+  /* Pre-multiplied alpha */
+  glEnable (GL_BLEND);
+  glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+  glBlendEquation (GL_FUNC_ADD);
 
   glGenVertexArrays (1, &vao_id);
   glBindVertexArray (vao_id);
@@ -1060,8 +1068,6 @@ void
 gsk_gl_command_queue_end_frame (GskGLCommandQueue *self)
 {
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
-
-  gsk_gl_command_queue_execute (self);
 
   while (self->all_batches.length > 0)
     {
