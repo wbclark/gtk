@@ -176,11 +176,12 @@ gsk_next_driver_begin_frame (GskNextDriver *self)
 
   self->in_frame = TRUE;
 
+  gsk_gl_command_queue_make_current (self->command_queue);
+  gsk_gl_command_queue_begin_frame (self->command_queue);
+
   gsk_gl_texture_library_begin_frame (GSK_GL_TEXTURE_LIBRARY (self->icons));
   gsk_gl_texture_library_begin_frame (GSK_GL_TEXTURE_LIBRARY (self->glyphs));
   gsk_gl_texture_library_begin_frame (GSK_GL_TEXTURE_LIBRARY (self->shadows));
-
-  gsk_gl_command_queue_begin_frame (self->command_queue);
 }
 
 void
