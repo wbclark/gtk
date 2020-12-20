@@ -35,6 +35,8 @@ void               gsk_gl_command_queue_make_current             (GskGLCommandQu
 void               gsk_gl_command_queue_begin_frame              (GskGLCommandQueue        *self);
 void               gsk_gl_command_queue_end_frame                (GskGLCommandQueue        *self);
 void               gsk_gl_command_queue_execute                  (GskGLCommandQueue        *self);
+void               gsk_gl_command_queue_set_viewport             (GskGLCommandQueue        *self,
+                                                                  const graphene_rect_t    *viewport);
 GdkTexture        *gsk_gl_command_queue_download                 (GskGLCommandQueue        *self,
                                                                   GError                  **error);
 GdkMemoryTexture  *gsk_gl_command_queue_download_texture         (GskGLCommandQueue        *self,

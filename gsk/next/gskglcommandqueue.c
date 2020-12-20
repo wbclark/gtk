@@ -1097,6 +1097,15 @@ gsk_gl_command_queue_bind_framebuffer (GskGLCommandQueue *self,
   gsk_gl_attachment_state_bind_framebuffer (self->attachments, framebuffer);
 }
 
+void
+gsk_gl_command_queue_set_viewport (GskGLCommandQueue     *self,
+                                   const graphene_rect_t *viewport)
+{
+  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+
+  /* TODO: Set viewport as part of batch */
+}
+
 static void
 gsk_gl_command_queue_save (GskGLCommandQueue *self)
 {
