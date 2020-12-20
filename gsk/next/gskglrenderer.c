@@ -224,16 +224,15 @@ gsk_gl_renderer_render (GskRenderer          *renderer,
   viewport.size.width = gdk_surface_get_width (surface) * scale_factor;
   viewport.size.height = gdk_surface_get_height (surface) * scale_factor;
 
+  gdk_draw_context_begin_frame (GDK_DRAW_CONTEXT (context), update_area);
   job = gsk_gl_render_job_new (self->driver,
-                               root,
                                &viewport,
                                scale_factor,
                                render_region,
                                0,
                                FALSE);
-
-  gdk_draw_context_begin_frame (GDK_DRAW_CONTEXT (context), update_area);
-  gsk_gl_render_job_run (job);
+  gsk_gl_render_job_prepare (job, root);
+  gsk_gl_render_job_render (job);
   gdk_draw_context_end_frame (GDK_DRAW_CONTEXT (context));
 
   gsk_gl_render_job_free (job);
@@ -270,8 +269,9 @@ gsk_gl_renderer_render_texture (GskRenderer           *renderer,
 
   gsk_gl_command_queue_autorelease_framebuffer (self->command_queue, fbo_id);
 
-  job = gsk_gl_render_job_new (self->driver, root, viewport, 1, NULL, fbo_id, TRUE);
-  gsk_gl_render_job_run (job);
+  job = gsk_gl_render_job_new (self->driver, viewport, 1, NULL, fbo_id, TRUE);
+  gsk_gl_render_job_prepare (job, root);
+  gsk_gl_render_job_render (job);
   gsk_gl_render_job_free (job);
 
   return create_texture_from_texture (context, texture_id, width, height);

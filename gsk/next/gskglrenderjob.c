@@ -23,6 +23,7 @@
 
 #include "config.h"
 
+#include <gdk/gdkglcontextprivate.h>
 #include <string.h>
 
 #include "gskglcommandqueueprivate.h"
@@ -35,7 +36,6 @@
 struct _GskGLRenderJob
 {
   GskNextDriver     *driver;
-  GskRenderNode     *root;
   cairo_region_t    *region;
   guint              framebuffer;
   graphene_rect_t    viewport;
@@ -307,7 +307,6 @@ gsk_gl_render_job_transform_bounds (GskGLRenderJob        *job,
 
 GskGLRenderJob *
 gsk_gl_render_job_new (GskNextDriver         *driver,
-                       GskRenderNode         *root,
                        const graphene_rect_t *viewport,
                        float                  scale_factor,
                        const cairo_region_t  *region,
@@ -319,13 +318,11 @@ gsk_gl_render_job_new (GskNextDriver         *driver,
   GskGLRenderJob *job;
 
   g_return_val_if_fail (GSK_IS_NEXT_DRIVER (driver), NULL);
-  g_return_val_if_fail (root != NULL, NULL);
   g_return_val_if_fail (viewport != NULL, NULL);
   g_return_val_if_fail (scale_factor > 0, NULL);
 
   job = g_slice_new0 (GskGLRenderJob);
   job->driver = g_object_ref (driver);
-  job->root = gsk_render_node_ref (root);
   job->clip = g_array_new (FALSE, FALSE, sizeof (GskGLRenderClip));
   job->modelview = g_array_new (FALSE, FALSE, sizeof (GskGLRenderModelview));
   job->framebuffer = framebuffer;
@@ -338,7 +335,6 @@ gsk_gl_render_job_new (GskNextDriver         *driver,
   job->flip_y = !!flip_y;
 
   init_projection_matrix (&job->projection, viewport, flip_y);
-
   gsk_gl_render_job_set_modelview (job, gsk_transform_scale (NULL, scale_factor, scale_factor));
 
   /* Setup our initial clip. If region is NULL then we are drawing the
@@ -366,6 +362,8 @@ gsk_gl_render_job_new (GskNextDriver         *driver,
                                                        clip_rect->size.width,
                                                        clip_rect->size.height));
 
+  gsk_gl_command_queue_bind_framebuffer (driver->command_queue, framebuffer);
+
   return job;
 }
 
@@ -380,7 +378,6 @@ gsk_gl_render_job_free (GskGLRenderJob *job)
     }
 
   g_clear_object (&job->driver);
-  g_clear_pointer (&job->root, gsk_render_node_unref);
   g_clear_pointer (&job->region, cairo_region_destroy);
   g_clear_pointer (&job->modelview, g_array_unref);
   g_clear_pointer (&job->clip, g_array_unref);
@@ -388,7 +385,23 @@ gsk_gl_render_job_free (GskGLRenderJob *job)
 }
 
 void
-gsk_gl_render_job_run (GskGLRenderJob *job)
+gsk_gl_render_job_prepare (GskGLRenderJob *job,
+                           GskRenderNode  *root)
+{
+  GdkGLContext *context;
+
+  g_return_if_fail (job != NULL);
+  g_return_if_fail (root != NULL);
+  g_return_if_fail (GSK_IS_NEXT_DRIVER (job->driver));
+
+  context = gsk_next_driver_get_context (job->driver);
+
+  gdk_gl_context_push_debug_group (context, "Adding render ops");
+  gdk_gl_context_pop_debug_group (context);
+}
+
+void
+gsk_gl_render_job_render (GskGLRenderJob *job)
 {
   g_return_if_fail (job != NULL);
   g_return_if_fail (GSK_IS_NEXT_DRIVER (job->driver));
