@@ -24,6 +24,7 @@
 #include "config.h"
 
 #include <gdk/gdkglcontextprivate.h>
+#include <gsk/gskrendernodeprivate.h>
 #include <math.h>
 #include <string.h>
 
@@ -247,6 +248,14 @@ gsk_gl_render_job_pop_modelview (GskGLRenderJob *job)
     }
 }
 
+static inline GskGLRenderClip *
+gsk_gl_render_job_get_clip (GskGLRenderJob *job)
+{
+  if (job->clip->len == 0)
+    return NULL;
+  else
+    return &g_array_index (job->clip, GskGLRenderClip, job->clip->len - 1);
+}
 
 static void
 gsk_gl_render_job_push_clip (GskGLRenderJob       *job,
@@ -295,6 +304,7 @@ gsk_gl_render_job_transform_bounds (GskGLRenderJob        *job,
 
   g_assert (job != NULL);
   g_assert (rect != NULL);
+  g_assert (out_rect != NULL);
 
   r.origin.x = rect->origin.x + job->offset_x;
   r.origin.y = rect->origin.y + job->offset_y;
@@ -383,6 +393,64 @@ gsk_gl_render_job_free (GskGLRenderJob *job)
   g_slice_free (GskGLRenderJob, job);
 }
 
+static inline gboolean G_GNUC_PURE
+node_is_invisible (const GskRenderNode *node)
+{
+  return node->bounds.size.width == 0.0f ||
+         node->bounds.size.height == 0.0f ||
+         isnan (node->bounds.size.width) ||
+         isnan (node->bounds.size.height);
+}
+
+static inline gboolean G_GNUC_PURE
+rect_intersects (const graphene_rect_t *r1,
+                 const graphene_rect_t *r2)
+{
+  /* Assume both rects are already normalized, as they usually are */
+  if (r1->origin.x > (r2->origin.x + r2->size.width) ||
+      (r1->origin.x + r1->size.width) < r2->origin.x)
+    return FALSE;
+
+  if (r1->origin.y > (r2->origin.y + r2->size.height) ||
+      (r1->origin.y + r1->size.height) < r2->origin.y)
+    return FALSE;
+
+  return TRUE;
+}
+
+static gboolean
+gsk_gl_render_job_node_overlaps_clip (GskGLRenderJob *job,
+                                      GskRenderNode  *node)
+{
+  GskGLRenderClip *clip;
+  graphene_rect_t transformed_bounds;
+
+  g_assert (job != NULL);
+  g_assert (node != NULL);
+
+  if (!(clip = gsk_gl_render_job_get_clip (job)))
+    return TRUE;
+
+  gsk_gl_render_job_transform_bounds (job, &node->bounds, &transformed_bounds);
+
+  return rect_intersects (&clip->rect.bounds, &transformed_bounds);
+}
+
+static void
+gsk_gl_render_job_visit_node (GskGLRenderJob *job,
+                              GskRenderNode  *node)
+{
+  g_assert (job != NULL);
+  g_assert (node != NULL);
+
+  if (node_is_invisible (node) ||
+      !gsk_gl_render_job_node_overlaps_clip (job, node))
+    return;
+
+
+
+}
+
 void
 gsk_gl_render_job_prepare (GskGLRenderJob *job,
                            GskRenderNode  *root)
@@ -402,6 +470,8 @@ gsk_gl_render_job_prepare (GskGLRenderJob *job,
   gsk_gl_command_queue_bind_framebuffer (command_queue, job->framebuffer);
   gsk_gl_command_queue_set_viewport (command_queue, &job->viewport);
   gsk_gl_command_queue_clear (command_queue);
+
+  gsk_gl_render_job_visit_node (job, root);
 
   gdk_gl_context_pop_debug_group (context);
 }
