@@ -1086,6 +1086,11 @@ gsk_gl_command_queue_end_frame (GskGLCommandQueue *self)
   if (self->autorelease_textures->len > 0)
     glDeleteTextures (self->autorelease_textures->len,
                       (GLuint *)(gpointer)self->autorelease_textures->data);
+
+  /* Allocate first batch for next round so we never have an empty
+   * GskGLCommandQueue.all_batches array to check for elsewhere.
+   */
+  gsk_gl_command_queue_advance (self, 0);
 }
 
 void
