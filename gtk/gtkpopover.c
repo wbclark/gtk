@@ -560,14 +560,35 @@ static gboolean
 present_popup (GtkPopover *popover)
 {
   GtkPopoverPrivate *priv = gtk_popover_get_instance_private (popover);
-  GtkRequisition req;
+  GtkRequisition min, nat;
   GdkPopupLayout *layout;
+  GtkRoot *root;
+  GdkSurface *surface;
+  GdkMonitor *monitor;
+  GdkRectangle rect;
+  int width, height;
 
   layout = create_popup_layout (popover);
-  gtk_widget_get_preferred_size (GTK_WIDGET (popover), NULL, &req);
+  gtk_widget_get_preferred_size (GTK_WIDGET (popover), &min, &nat);
+
+  root = gtk_widget_get_root (gtk_widget_get_parent (GTK_WIDGET (popover)));
+  surface = gtk_native_get_surface (GTK_NATIVE (root));
+  monitor = gdk_display_get_monitor_at_surface (gdk_surface_get_display (surface), surface);
+  gdk_monitor_get_geometry (monitor, &rect);
+
+  if (rect.width >= nat.width)
+    {
+      width = nat.width;
+      height = nat.height;
+    }
+  else
+    {
+      width = CLAMP (nat.width, min.width, rect.width);
+      height = CLAMP (nat.height, min.height, rect.height);
+    }
+
   if (gdk_popup_present (GDK_POPUP (priv->surface),
-                         MAX (req.width, 1),
-                         MAX (req.height, 1),
+                         width, height,
                          layout))
     {
       update_popover_layout (popover, layout);
