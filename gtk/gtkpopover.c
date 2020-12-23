@@ -545,9 +545,9 @@ create_popup_layout (GtkPopover *popover)
       g_assert_not_reached ();
     }
 
-  layout = gdk_popup_layout_new (&rect,
-                                 parent_anchor,
-                                 surface_anchor);
+  anchor_hints |= GDK_ANCHOR_RESIZE;
+
+  layout = gdk_popup_layout_new (&rect, parent_anchor, surface_anchor);
   gdk_popup_layout_set_anchor_hints (layout, anchor_hints);
 
   if (priv->x_offset || priv->y_offset)
@@ -560,35 +560,14 @@ static gboolean
 present_popup (GtkPopover *popover)
 {
   GtkPopoverPrivate *priv = gtk_popover_get_instance_private (popover);
-  GtkRequisition min, nat;
+  GtkRequisition nat;
   GdkPopupLayout *layout;
-  GtkRoot *root;
-  GdkSurface *surface;
-  GdkMonitor *monitor;
-  GdkRectangle rect;
-  int width, height;
 
   layout = create_popup_layout (popover);
-  gtk_widget_get_preferred_size (GTK_WIDGET (popover), &min, &nat);
-
-  root = gtk_widget_get_root (gtk_widget_get_parent (GTK_WIDGET (popover)));
-  surface = gtk_native_get_surface (GTK_NATIVE (root));
-  monitor = gdk_display_get_monitor_at_surface (gdk_surface_get_display (surface), surface);
-  gdk_monitor_get_geometry (monitor, &rect);
-
-  if (rect.width >= nat.width)
-    {
-      width = nat.width;
-      height = nat.height;
-    }
-  else
-    {
-      width = CLAMP (nat.width, min.width, rect.width);
-      height = CLAMP (nat.height, min.height, rect.height);
-    }
+  gtk_widget_get_preferred_size (GTK_WIDGET (popover), NULL, &nat);
 
   if (gdk_popup_present (GDK_POPUP (priv->surface),
-                         width, height,
+                         nat.width, nat.height,
                          layout))
     {
       update_popover_layout (popover, layout);
