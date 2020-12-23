@@ -35,13 +35,8 @@ void               gsk_gl_command_queue_make_current             (GskGLCommandQu
 void               gsk_gl_command_queue_begin_frame              (GskGLCommandQueue        *self);
 void               gsk_gl_command_queue_end_frame                (GskGLCommandQueue        *self);
 void               gsk_gl_command_queue_execute                  (GskGLCommandQueue        *self);
-void               gsk_gl_command_queue_set_viewport             (GskGLCommandQueue        *self,
+void               gsk_gl_command_queue_change_viewport          (GskGLCommandQueue        *self,
                                                                   const graphene_rect_t    *viewport);
-GdkTexture        *gsk_gl_command_queue_download                 (GskGLCommandQueue        *self,
-                                                                  GError                  **error);
-GdkMemoryTexture  *gsk_gl_command_queue_download_texture         (GskGLCommandQueue        *self,
-                                                                  guint                     texture_id,
-                                                                  GError                  **error);
 guint              gsk_gl_command_queue_upload_texture           (GskGLCommandQueue        *self,
                                                                   GdkTexture               *texture,
                                                                   GError                  **error);
@@ -58,11 +53,10 @@ gboolean           gsk_gl_command_queue_create_render_target     (GskGLCommandQu
                                                                   guint                    *out_texture_id);
 void               gsk_gl_command_queue_delete_program           (GskGLCommandQueue        *self,
                                                                   guint                     program_id);
-void               gsk_gl_command_queue_use_program              (GskGLCommandQueue        *self,
-                                                                  guint                     program_id);
 void               gsk_gl_command_queue_bind_framebuffer         (GskGLCommandQueue        *self,
                                                                   guint                     framebuffer);
-void               gsk_gl_command_queue_clear                    (GskGLCommandQueue        *self);
+void               gsk_gl_command_queue_clear                    (GskGLCommandQueue        *self,
+                                                                  guint                     clear_bits);
 void               gsk_gl_command_queue_set_uniform1i            (GskGLCommandQueue        *self,
                                                                   guint                     program,
                                                                   guint                     location,
@@ -140,12 +134,18 @@ void               gsk_gl_command_queue_set_uniform_rounded_rect (GskGLCommandQu
                                                                   guint                     program,
                                                                   guint                     location,
                                                                   const GskRoundedRect     *rounded_rect);
+void               gsk_gl_command_queue_push_debug_group         (GskGLCommandQueue        *self,
+                                                                  const char               *message);
+void               gsk_gl_command_queue_pop_debug_group          (GskGLCommandQueue        *self);
 void               gsk_gl_command_queue_autorelease_framebuffer  (GskGLCommandQueue        *self,
                                                                   guint                     framebuffer_id);
 void               gsk_gl_command_queue_autorelease_texture      (GskGLCommandQueue        *self,
                                                                   guint                     texture_id);
-GskGLDrawVertex   *gsk_gl_command_queue_draw                     (GskGLCommandQueue        *self,
-                                                                  const GskGLDrawVertex     vertices[6]);
+void               gsk_gl_command_queue_begin_draw               (GskGLCommandQueue        *self,
+                                                                  guint                     program);
+void               gsk_gl_command_queue_end_draw                 (GskGLCommandQueue        *self);
+GskGLDrawVertex   *gsk_gl_command_queue_add_vertices             (GskGLCommandQueue        *self,
+                                                                  const GskGLDrawVertex     vertices[GSK_GL_N_VERTICES]);
 
 G_END_DECLS
 

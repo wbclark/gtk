@@ -28,6 +28,8 @@
 
 G_BEGIN_DECLS
 
+#define GSK_GL_N_VERTICES 6
+
 typedef struct _GskGLAttachmentState GskGLAttachmentState;
 typedef struct _GskGLCommandQueue GskGLCommandQueue;
 typedef struct _GskGLCompiler GskGLCompiler;

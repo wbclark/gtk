@@ -20,6 +20,7 @@
 
 #include "config.h"
 
+#include <gdk/gdkglcontextprivate.h>
 #include <gsk/gskdebugprivate.h>
 #include <epoxy/gl.h>
 
@@ -28,44 +29,25 @@
 #include "gskglcommandqueueprivate.h"
 #include "gskgluniformstateprivate.h"
 
-/* The MAX_MERGE_DISTANCE is used to reduce how far back we'll look for
- * programs to merge a batch with. This number is specific to batches using
- * the same program as a secondary index (See program_link field) is used
- * for tracking those.
- */
-#define MAX_MERGE_DISTANCE 5
-
 struct _GskGLCommandQueue
 {
   GObject parent_instance;
 
+  /* The GdkGLContext we make current before executing GL commands. */
   GdkGLContext *context;
 
-  /* Queue containing a linked list of all the GskGLCommandBatch that have
-   * been allocated so that we can reuse them on the next frame without
-   * allocating additional memory. Using stable pointers instead of offsets
-   * into an array makes this a bit easier to manage from a life-cycle
-   * standpoint as well as reordering using the links instead of memmove()s
-   * in an array.
+  /* Array of GskGLCommandBatch which is a fixed size structure that will
+   * point into offsets of other arrays so that all similar data is stored
+   * together. The idea here is that we reduce the need for pointers so that
+   * using g_realloc()'d arrays is fine.
    */
-  GQueue unused_batches;
+  GArray *batches;
 
-  /* As we build the real command queue, we place the batches into this
-   * queue by pushing onto the tail. Executing commands will result in
-   * walking this queue from head to tail.
+  /* Contains array of vertices and some wrapper code to help upload them
+   * to the GL driver. We can also tweak this to use double buffered arrays
+   * if we find that to be faster on some hardware and/or drivers.
    */
-  GQueue all_batches;
-
-  /* When merging batches we want to skip all items between the merge
-   * candidate and the previous within it's program. To do this we keep an
-   * index of commands by program to avoid iteration overhead. This array
-   * contains a GQueue for each program which will point into the statically
-   * allocated @program_link in GskGLCommandBatch.
-   *
-   * After we find a merge candidate, we check for clipping and other
-   * changes which might make them unacceptable to merge.
-   */
-  GArray *program_batches;
+  GskGLBuffer *vertices;
 
   /* The GskGLAttachmentState contains information about our FBO and texture
    * attachments as we process incoming operations. We snapshot them into
@@ -80,11 +62,24 @@ struct _GskGLCommandQueue
    */
   GskGLUniformState *uniforms;
 
-  /* Our VBO containing all the vertices to upload to the GPU before calling
-   * glDrawArrays() to draw. Each drawing operation contains 6 vec4 with the
-   * positions necessary to draw with glDrawArrays().
+  /* Array of GskGLCommandDraw which allows us to have a static size field
+   * in GskGLCommandBatch to coalesce draws. Multiple GskGLCommandDraw may
+   * be processed together (and out-of-order) to reduce the number of state
+   * changes when submitting commands.
    */
-  GskGLBuffer *vertices;
+  GArray *batch_draws;
+
+  /* Array of GskGLCommandBind which denote what textures need to be attached
+   * to which slot. GskGLCommandDraw.bind_offset and bind_count reference this
+   * array to determine what to attach.
+   */
+  GArray *batch_binds;
+
+  /* Array of GskGLCommandUniform denoting which uniforms must be updated
+   * before the glDrawArrays() may be called. These are referenced from the
+   * GskGLCommandDraw.uniform_offset and uniform_count fields.
+   */
+  GArray *batch_uniforms;
 
   /* Sometimes we want to save attachment state so that operations we do
    * cannot affect anything that is known to the command queue. We call
@@ -103,486 +98,164 @@ struct _GskGLCommandQueue
   GArray *autorelease_framebuffers;
   GArray *autorelease_textures;
 
+  /* String storage for debug groups */
+  GStringChunk *debug_groups;
+
+  /* Discovered max texture size when loading the command queue so that we
+   * can either scale down or slice textures to fit within this size. Assumed
+   * to be both height and width.
+   */
   int max_texture_size;
+
+  /* The index of the last batch in @batches, which may not be the element
+   * at the end of the array, as batches can be reordered. This is used to
+   * update the "next" index when adding a new batch.
+   */
+  int tail_batch_index;
+
+  /* If we're inside of a begin_draw()/end_draw() pair. */
+  guint in_draw : 1;
 };
+
+typedef enum _GskGLCommandKind
+{
+  /* The batch will perform a glClear() */
+  GSK_GL_COMMAND_KIND_CLEAR,
+
+  /* THe batch represents a new debug group */
+  GSK_GL_COMMAND_KIND_PUSH_DEBUG_GROUP,
+
+  /* The batch represents the end of a debug group */
+  GSK_GL_COMMAND_KIND_POP_DEBUG_GROUP,
+
+  /* The batch will perform a glDrawArrays() */
+  GSK_GL_COMMAND_KIND_DRAW,
+} GskGLCommandKind;
+
+typedef struct _GskGLCommandBind
+{
+  /* @texture is the value passed to glActiveTexture(), the "slot" the
+   * texture will be placed into. We always use GL_TEXTURE_2D so we don't
+   * waste any bits here to indicate that.
+   */
+  guint texture : 5;
+
+  /* The identifier for the texture created with glGenTextures(). */
+  guint id : 27;
+} GskGLCommandBind;
+
+G_STATIC_ASSERT (sizeof (GskGLCommandBind) == 4);
 
 typedef struct _GskGLCommandDraw
 {
-  guint vao_offset;
-  guint vao_count;
+  /* There doesn't seem to be a limit on the framebuffer identifier that
+   * can be returned, so we have to use a whole unsigned for the framebuffer
+   * we are drawing to. When processing batches, we check to see if this
+   * changes and adjust the render target accordingly. Some sorting is
+   * performed to reduce the amount we change framebuffers.
+   */
+  guint framebuffer;
+
+  /* The number of uniforms to change. This must be less than or equal to
+   * GL_MAX_UNIFORM_LOCATIONS but only guaranteed up to 1024 by any OpenGL
+   * implementation to be conformant.
+   */
+  guint uniform_count : 11;
+
+  /* The number of textures to bind, which is only guaranteed up to 16
+   * by the OpenGL specification to be conformant.
+   */
+  guint bind_count : 5;
+
+  /* GL_MAX_ELEMENTS_VERTICES specifies 33000 for this which requires 16-bit
+   * to address all possible counts <= GL_MAX_ELEMENTS_VERTICES.
+   */
+  guint vbo_count : 16;
+
+  /* The offset within the VBO containing @vbo_count vertices to send with
+   * glDrawArrays().
+   */
+  guint vbo_offset;
+
+  /* The offset within the array of uniform changes to be made containing
+   * @uniform_count #GskGLCommandUniform elements to apply.
+   */
+  guint uniform_offset;
+
+  /* The offset within the array of bind changes to be made containing
+   * @bind_count #GskGLCommandBind elements to apply.
+   */
+  guint bind_offset;
 } GskGLCommandDraw;
 
-G_STATIC_ASSERT (sizeof (GskGLCommandDraw) == 8);
+G_STATIC_ASSERT (sizeof (GskGLCommandDraw) == 20);
 
 typedef struct _GskGLCommandUniform
 {
-  guint offset;
-  guint array_count : 16;
-  guint location : 7;
-  guint format : 5;
-  guint flags : 4;
+  GskGLUniformInfo info;
+  guint            location;
 } GskGLCommandUniform;
 
 G_STATIC_ASSERT (sizeof (GskGLCommandUniform) == 8);
 
 typedef struct _GskGLCommandBatch
 {
-  /* An index into GskGLCommandQueue.all_batches */
-  GList all_link;
+  /* The index of the next batch following this one. This is used
+   * as a sort of integer-based linked list to simplify out-of-order
+   * batching without moving memory around. -1 indicates last batch.
+   */
+  int next_batch_index;
 
-  /* An index into GskGLCommandBatch.program_batches */
-  GList program_link;
+  /* A GskGLCommandKind indicating what the batch will do */
+  guint kind : 8;
+
+  /* The program's identifier to use for determining if we can merge two
+   * batches together into a single set of draw operations. We put this
+   * here instead of the GskGLCommandDraw so that we can use the extra
+   * bits here without making the structure larger.
+   */
+  guint program : 24;
 
   union {
-    GskGLBindTexture  bind;
-    GskGLBindTexture *binds;
+    /* Information about what to draw */
+    GskGLCommandDraw draw;
+
+    /* The message to apply when pushing a debug group */
+    const char *debug_group;
+
+    /* The bits to glClear() */
+    struct {
+      guint bits;
+      guint framebuffer;
+    } clear;
   };
-
-  union {
-    GskGLCommandDraw  draw;
-    GskGLCommandDraw *draws;
-  };
-
-  union {
-    GskGLCommandUniform  uniform;
-    GskGLCommandUniform *uniforms;
-  };
-
-  guint is_clear : 1;
-  guint program_changed : 1;
-  guint program : 14;
-  guint n_draws : 16;
-  guint n_binds : 16;
-  guint n_uniforms : 16;
-
-  /* The framebuffer to use and if it has changed */
-  GskGLBindFramebuffer framebuffer;
 } GskGLCommandBatch;
+
+G_STATIC_ASSERT (sizeof (GskGLCommandBatch) == 32);
 
 G_DEFINE_TYPE (GskGLCommandQueue, gsk_gl_command_queue, G_TYPE_OBJECT)
 
-static inline gboolean
-ispow2 (guint n)
-{
-  return !(n & (n-1));
-}
-
-static GskGLCommandBatch *
-gsk_gl_command_queue_alloc_batch (GskGLCommandQueue *self)
-{
-  GskGLCommandBatch *batch;
-
-  g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
-
-  if G_LIKELY (self->unused_batches.length > 0)
-    return g_queue_pop_head_link (&self->unused_batches)->data;
-
-  batch = g_slice_new0 (GskGLCommandBatch);
-  batch->all_link.data = batch;
-  batch->program_link.data = batch;
-
-  return batch;
-}
-
 static void
-gsk_gl_command_queue_release_batch (GskGLCommandQueue *self,
-                                    GskGLCommandBatch *batch)
-{
-  g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
-  g_assert (batch != NULL);
-
-  g_queue_unlink (&self->all_batches, &batch->all_link);
-
-  g_assert (batch->program ||
-            (batch->program_link.prev == NULL &&
-             batch->program_link.next == NULL));
-
-  if (batch->program_link.prev || batch->program_link.next)
-    {
-      GQueue *queue = &g_array_index (self->program_batches, GQueue, batch->program);
-      g_queue_unlink (queue, &batch->program_link);
-    }
-
-  if (batch->n_draws > 1)
-    g_free (batch->draws);
-
-  if (batch->n_binds > 1)
-    g_free (batch->binds);
-
-  batch->n_binds = 0;
-  batch->n_draws = 0;
-  batch->binds = NULL;
-  batch->draws = NULL;
-  batch->framebuffer.id = 0;
-  batch->framebuffer.changed = FALSE;
-  batch->program = 0;
-  batch->program_changed = FALSE;
-
-  g_assert (batch->program_link.prev == NULL);
-  g_assert (batch->program_link.next == NULL);
-  g_assert (batch->program_link.data == batch);
-  g_assert (batch->all_link.prev == NULL);
-  g_assert (batch->all_link.next == NULL);
-  g_assert (batch->all_link.data == batch);
-
-  g_queue_push_head_link (&self->unused_batches, &batch->all_link);
-}
-
-static void
-gsk_gl_command_batch_apply_uniform (GskGLCommandBatch         *batch,
-                                    GskGLUniformState         *state,
-                                    const GskGLCommandUniform *uniform)
-{
-  const union {
-    graphene_matrix_t matrix[0];
-    GskRoundedRect rounded_rect[0];
-    float fval[0];
-    int ival[0];
-  } *data;
-
-  g_assert (batch != NULL);
-  g_assert (uniform != NULL);
-
-  data = gsk_gl_uniform_state_get_uniform_data (state, uniform->offset);
-
-  switch (uniform->format)
-    {
-    case GSK_GL_UNIFORM_FORMAT_1F:
-      glUniform1f (uniform->location, data->fval[0]);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_2F:
-      glUniform2f (uniform->location, data->fval[0], data->fval[1]);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_3F:
-      glUniform3f (uniform->location, data->fval[0], data->fval[1], data->fval[2]);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_4F:
-      glUniform4f (uniform->location, data->fval[0], data->fval[1], data->fval[2], data->fval[3]);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_1FV:
-      glUniform1fv (uniform->location, uniform->array_count, data->fval);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_2FV:
-      glUniform2fv (uniform->location, uniform->array_count, data->fval);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_3FV:
-      glUniform3fv (uniform->location, uniform->array_count, data->fval);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_4FV:
-      glUniform4fv (uniform->location, uniform->array_count, data->fval);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_1I:
-    case GSK_GL_UNIFORM_FORMAT_TEXTURE:
-      glUniform1i (uniform->location, data->ival[0]);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_2I:
-      glUniform2i (uniform->location, data->ival[0], data->ival[1]);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_3I:
-      glUniform3i (uniform->location, data->ival[0], data->ival[1], data->ival[2]);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_4I:
-      glUniform4i (uniform->location, data->ival[0], data->ival[1], data->ival[2], data->ival[3]);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_MATRIX: {
-      float mat[16];
-      graphene_matrix_to_float (&data->matrix[0], mat);
-      glUniformMatrix4fv (uniform->location, 1, GL_FALSE, mat);
-      break;
-    }
-
-    case GSK_GL_UNIFORM_FORMAT_COLOR:
-      glUniform4fv (uniform->location, 1, &data->fval[0]);
-      break;
-
-    case GSK_GL_UNIFORM_FORMAT_ROUNDED_RECT:
-      if (uniform->flags & GSK_GL_UNIFORM_FLAGS_SEND_CORNERS)
-        glUniform4fv (uniform->location, 3, (const float *)&data->rounded_rect[0]);
-      else
-        glUniform4fv (uniform->location, 1, (const float *)&data->rounded_rect[0]);
-      break;
-
-    default:
-      break;
-    }
-}
-
-static void
-gsk_gl_command_batch_draw (GskGLCommandBatch *batch,
-                           guint              vao_offset,
-                           guint              vao_count)
-{
-  GskGLCommandDraw *last;
-
-  g_assert (batch != NULL);
-
-  if (batch->n_draws == 0)
-    {
-      batch->draw.vao_offset = vao_offset;
-      batch->draw.vao_count = vao_count;
-      batch->n_draws = 1;
-      return;
-    }
-
-  last = batch->n_draws == 1 ? &batch->draw : &batch->draws[batch->n_draws-1];
-
-  if (last->vao_offset + last->vao_count == vao_offset)
-    {
-      batch->draw.vao_count += vao_count;
-    }
-  else if (batch->n_draws == 1)
-    {
-      GskGLCommandDraw *draws = g_new (GskGLCommandDraw, 16);
-
-      draws[0].vao_offset = batch->draw.vao_offset;
-      draws[0].vao_count = batch->draw.vao_count;
-      draws[1].vao_offset = vao_offset;
-      draws[1].vao_count = vao_count;
-
-      batch->draws = draws;
-      batch->n_draws = 2;
-    }
-  else
-    {
-      if G_UNLIKELY (batch->n_draws >= 16 && ispow2 (batch->n_draws))
-        batch->draws = g_realloc (batch->draws, sizeof (GskGLCommandDraw) * batch->n_draws * 2);
-
-      batch->draws[batch->n_draws].vao_count = vao_count;
-      batch->draws[batch->n_draws].vao_offset = vao_offset;
-      batch->n_draws++;
-    }
-}
-
-static void
-gsk_gl_command_batch_execute (GskGLCommandBatch *batch,
-                              GskGLUniformState *uniforms)
-{
-  g_assert (batch != NULL);
-  g_assert (batch->n_draws > 0);
-
-  if (batch->framebuffer.changed)
-    glBindFramebuffer (GL_FRAMEBUFFER, batch->framebuffer.id);
-
-  if (batch->program_changed)
-    glUseProgram (batch->program);
-
-  if (batch->n_binds == 1)
-    {
-      g_assert (batch->bind.changed);
-
-      glActiveTexture (batch->bind.texture);
-      glBindTexture (batch->bind.target, batch->bind.id);
-    }
-  else if (batch->n_binds > 1)
-    {
-      for (guint i = 0; i < batch->n_binds; i++)
-        {
-          const GskGLBindTexture *bind = &batch->binds[i];
-
-          g_assert (bind->changed);
-
-          glActiveTexture (bind->texture);
-          glBindTexture (bind->target, bind->id);
-        }
-    }
-
-  if (batch->n_uniforms == 1)
-    {
-      gsk_gl_command_batch_apply_uniform (batch, uniforms, &batch->uniform);
-    }
-  else if (batch->n_uniforms > 0)
-    {
-      for (guint i = 0; i < batch->n_uniforms; i++)
-        {
-          const GskGLCommandUniform *uniform = &batch->uniforms[i];
-          gsk_gl_command_batch_apply_uniform (batch, uniforms, uniform);
-        }
-    }
-
-  if (batch->is_clear)
-    {
-      glClearColor (0, 0, 0, 0);
-      glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-    }
-  else if (batch->n_draws == 1)
-    {
-      glDrawArrays (GL_TRIANGLES, batch->draw.vao_offset, batch->draw.vao_count);
-    }
-  else if (batch->n_draws > 1)
-    {
-      for (guint i = 0; i < batch->n_draws; i++)
-        {
-          const GskGLCommandDraw *draw = &batch->draws[i];
-
-          g_assert (draw->vao_count > 0);
-
-          glDrawArrays (GL_TRIANGLES, draw->vao_offset, draw->vao_count);
-        }
-    }
-}
-
-static void
-gsk_gl_command_batch_uniform_cb (const GskGLUniformInfo *info,
-                                 guint                   location,
-                                 gpointer                user_data)
-{
-  GskGLCommandBatch *batch = user_data;
-  GskGLCommandUniform *u;
-
-  g_assert (batch != NULL);
-  g_assert (info != NULL);
-
-  if (batch->n_uniforms == 0)
-    {
-      u = &batch->uniform;
-      batch->n_uniforms = 1;
-    }
-  else if (batch->n_uniforms == 1)
-    {
-      u = g_new (GskGLCommandUniform, 2);
-      u[0] = batch->uniform;
-      batch->uniforms = u;
-      batch->n_uniforms = 2;
-      u = &u[1];
-    }
-  else
-    {
-      u = g_realloc_n (batch->uniforms, batch->n_uniforms+1, sizeof (GskGLCommandUniform));
-      batch->uniforms = u;
-      u = &u[batch->n_uniforms];
-      batch->n_uniforms++;
-    }
-
-  u->format = info->format;
-  u->flags = info->flags;
-  u->array_count = info->array_count;
-  u->location = location;
-  u->offset = info->offset;
-}
-
-static gboolean
-gsk_gl_command_batch_mergeable (GskGLCommandBatch *batch,
-                                GskGLCommandBatch *other)
-{
-  g_assert (batch != NULL);
-  g_assert (other != NULL);
-  g_assert (batch != other);
-
-  if (batch->program != other->program)
-    return FALSE;
-
-  return FALSE;
-}
-
-static void
-gsk_gl_command_queue_try_merge (GskGLCommandQueue *self,
-                                GskGLCommandBatch *batch)
-{
-  guint count = 0;
-
-  g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
-  g_assert (batch != NULL);
-  g_assert (batch->program != 0);
-
-  /* We probably only want to look at the past couple by program to
-   * avoid pathological situations. In most cases, they will naturally
-   * come within the last few submissions.
-   */
-
-  for (const GList *iter = batch->program_link.prev;
-       iter != NULL && count < MAX_MERGE_DISTANCE;
-       iter = iter->prev, count++)
-    {
-      GskGLCommandBatch *predecessor = iter->data;
-
-      if (gsk_gl_command_batch_mergeable (predecessor, batch))
-        {
-          /* We need to check all the intermediates for overdrawing. */
-        }
-    }
-}
-
-static inline GskGLCommandBatch *
-gsk_gl_command_queue_get_batch (GskGLCommandQueue *self)
+gsk_gl_command_queue_save (GskGLCommandQueue *self)
 {
   g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
 
-  return self->all_batches.tail->data;
+  g_ptr_array_add (self->saved_state,
+                   gsk_gl_attachment_state_save (self->attachments));
 }
 
-static GskGLCommandBatch *
-gsk_gl_command_queue_advance (GskGLCommandQueue *self,
-                              guint              new_program)
+static void
+gsk_gl_command_queue_restore (GskGLCommandQueue *self)
 {
-  GskGLCommandBatch *last_batch = NULL;
-  GskGLCommandBatch *batch;
+  GskGLAttachmentState *saved;
 
   g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_assert (self->saved_state->len > 0);
 
-  if (self->all_batches.length > 0)
-    {
-      last_batch = self->all_batches.tail->data;
+  saved = g_ptr_array_steal_index (self->saved_state,
+                                   self->saved_state->len - 1);
 
-      gsk_gl_uniform_state_snapshot (self->uniforms,
-                                     last_batch->program,
-                                     gsk_gl_command_batch_uniform_cb,
-                                     last_batch);
-    }
-
-  batch = gsk_gl_command_queue_alloc_batch (self);
-
-  if G_LIKELY (last_batch != NULL)
-    {
-      batch->program = new_program ? new_program : last_batch->program;
-      batch->program_changed = batch->program != last_batch->program;
-      batch->framebuffer = last_batch->framebuffer;
-      batch->framebuffer.changed = FALSE;
-    }
-  else
-    {
-      batch->program = new_program;
-      batch->program_changed = TRUE;
-      batch->framebuffer.id = 0;
-      batch->framebuffer.changed = FALSE;
-    }
-
-  g_queue_push_tail_link (&self->all_batches, &batch->all_link);
-
-  if (batch->program)
-    {
-      GQueue *q;
-
-      if (self->program_batches->len <= batch->program)
-        g_array_set_size (self->program_batches, batch->program + 1);
-
-      q = &g_array_index (self->program_batches, GQueue, batch->program);
-      g_queue_push_tail_link (q, &batch->program_link);
-    }
-
-  if (last_batch != NULL)
-    gsk_gl_command_queue_try_merge (self, last_batch);
-
-  return g_steal_pointer (&batch);
-}
-
-static inline gboolean
-gsk_gl_command_queue_batch_is_complete (GskGLCommandQueue *self)
-{
-  GskGLCommandBatch *batch = gsk_gl_command_queue_get_batch (self);
-
-  return batch->is_clear || (batch->program && batch->n_draws > 0);
+  gsk_gl_attachment_state_restore (saved);
 }
 
 static void
@@ -592,38 +265,15 @@ gsk_gl_command_queue_dispose (GObject *object)
 
   g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
 
-  while (self->all_batches.length > 0)
-    {
-      GskGLCommandBatch *batch = self->all_batches.head->data;
-
-      gsk_gl_command_queue_release_batch (self, batch);
-    }
-
-  while (self->unused_batches.length > 0)
-    {
-      GskGLCommandBatch *batch = self->unused_batches.head->data;
-
-      g_queue_unlink (&self->unused_batches, self->unused_batches.head->data);
-      g_slice_free (GskGLCommandBatch, batch);
-    }
-
-#ifndef G_DISABLE_DEBUG
-  g_assert (self->unused_batches.length == 0);
-  g_assert (self->all_batches.length == 0);
-
-  for (guint i = 0; i < self->program_batches->len; i++)
-    {
-      GQueue *q = &g_array_index (self->program_batches, GQueue, i);
-      g_assert (q->length == 0);
-    }
-#endif
-
-  g_clear_pointer (&self->saved_state, g_ptr_array_unref);
-  g_clear_pointer (&self->attachments, gsk_gl_attachment_state_free);
   g_clear_object (&self->context);
+  g_clear_pointer (&self->batches, g_array_unref);
+  g_clear_pointer (&self->attachments, gsk_gl_attachment_state_free);
   g_clear_pointer (&self->uniforms, gsk_gl_uniform_state_free);
   g_clear_pointer (&self->vertices, gsk_gl_buffer_free);
-  g_clear_pointer (&self->program_batches, g_array_unref);
+  g_clear_pointer (&self->batch_draws, g_array_unref);
+  g_clear_pointer (&self->batch_binds, g_array_unref);
+  g_clear_pointer (&self->batch_uniforms, g_array_unref);
+  g_clear_pointer (&self->saved_state, g_ptr_array_unref);
   g_clear_pointer (&self->autorelease_framebuffers, g_array_unref);
   g_clear_pointer (&self->autorelease_textures, g_array_unref);
 
@@ -643,15 +293,17 @@ gsk_gl_command_queue_init (GskGLCommandQueue *self)
 {
   self->max_texture_size = -1;
 
+  self->batches = g_array_new (FALSE, TRUE, sizeof (GskGLCommandBatch));
+  self->batch_draws = g_array_new (FALSE, FALSE, sizeof (GskGLCommandDraw));
+  self->batch_binds = g_array_new (FALSE, FALSE, sizeof (GskGLCommandBind));
+  self->batch_uniforms = g_array_new (FALSE, FALSE, sizeof (GskGLCommandUniform));
   self->attachments = gsk_gl_attachment_state_new ();
   self->vertices = gsk_gl_buffer_new (GL_ARRAY_BUFFER, sizeof (GskGLDrawVertex));
   self->uniforms = gsk_gl_uniform_state_new ();
-  self->program_batches = g_array_new (FALSE, TRUE, sizeof (GQueue));
   self->saved_state = g_ptr_array_new_with_free_func ((GDestroyNotify)gsk_gl_attachment_state_free);
   self->autorelease_textures = g_array_new (FALSE, FALSE, sizeof (GLuint));
   self->autorelease_framebuffers = g_array_new (FALSE, FALSE, sizeof (GLuint));
-
-  gsk_gl_command_queue_advance (self, 0);
+  self->debug_groups = g_string_chunk_new (4096);
 }
 
 GskGLCommandQueue *
@@ -663,15 +315,194 @@ gsk_gl_command_queue_new (GdkGLContext *context)
 
   self = g_object_new (GSK_TYPE_GL_COMMAND_QUEUE, NULL);
   self->context = g_object_ref (context);
+  
+  return g_steal_pointer (&self);
+}
 
-  if (self->max_texture_size < 0)
+void
+gsk_gl_command_queue_begin_draw (GskGLCommandQueue *self,
+                                 guint              program)
+{
+  GskGLCommandBatch *batch;
+
+  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (self->in_draw == FALSE);
+
+  g_array_set_size (self->batches, self->batches->len + 1);
+
+  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  batch->kind = GSK_GL_COMMAND_KIND_DRAW;
+  batch->program = program;
+  batch->next_batch_index = -1;
+  batch->draw.framebuffer = 0;
+  batch->draw.uniform_count = 0;
+  batch->draw.uniform_offset = self->batch_uniforms->len;
+  batch->draw.bind_count = 0;
+  batch->draw.bind_offset = self->batch_binds->len;
+  batch->draw.vbo_count = 0;
+  batch->draw.vbo_offset = gsk_gl_buffer_get_offset (self->vertices);
+}
+
+static void
+gsk_gl_command_queue_uniform_snapshot_cb (const GskGLUniformInfo *info,
+                                          guint                   location,
+                                          gpointer                user_data)
+{
+  GskGLCommandQueue *self = user_data;
+  GskGLCommandUniform uniform;
+
+  g_assert (info != NULL);
+  g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
+
+  uniform.location = location;
+  uniform.info = *info;
+
+  g_array_append_val (self->batch_uniforms, uniform);
+}
+
+void
+gsk_gl_command_queue_end_draw (GskGLCommandQueue *self)
+{
+  GskGLCommandBatch *batch;
+
+  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (self->batches->len > 0);
+  g_return_if_fail (self->in_draw == TRUE);
+
+  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  
+  g_assert (batch->kind == GSK_GL_COMMAND_KIND_DRAW);
+
+  /* Track the destination framebuffer in case it changed */
+  batch->draw.framebuffer = self->attachments->fbo.id;
+  self->attachments->fbo.changed = FALSE;
+
+  /* Track the list of uniforms that changed */
+  batch->draw.uniform_offset = self->batch_uniforms->len;
+  gsk_gl_uniform_state_snapshot (self->uniforms,
+                                 batch->program,
+                                 gsk_gl_command_queue_uniform_snapshot_cb,
+                                 self);
+  batch->draw.uniform_count = self->batch_uniforms->len - batch->draw.uniform_offset;
+
+  /* Track the bind attachments that changed */
+  batch->draw.bind_offset = self->batch_binds->len;
+  batch->draw.bind_count = 0;
+  for (guint i = 0; i < G_N_ELEMENTS (self->attachments->textures); i++)
     {
-      gdk_gl_context_make_current (context);
-      glGetIntegerv (GL_MAX_TEXTURE_SIZE, (GLint *)&self->max_texture_size);
-      GSK_NOTE (OPENGL, g_message ("GL max texture size: %d", self->max_texture_size));
+      GskGLBindTexture *texture = &self->attachments->textures[i];
+
+      if (texture->changed)
+        {
+          GskGLCommandBind bind;
+
+          texture->changed = FALSE;
+
+          bind.texture = texture->texture;
+          bind.id = texture->id;
+
+          g_array_append_val (self->batch_binds, bind);
+
+          batch->draw.bind_count++;
+        }
     }
 
-  return g_steal_pointer (&self);
+  if (self->tail_batch_index > -1)
+    {
+      GskGLCommandBatch *last_batch = &g_array_index (self->batches, GskGLCommandBatch, self->tail_batch_index);
+      last_batch->next_batch_index = self->batches->len - 1;
+    }
+
+  self->tail_batch_index = self->batches->len - 1;
+
+  self->in_draw = FALSE;
+}
+
+GskGLDrawVertex *
+gsk_gl_command_queue_add_vertices (GskGLCommandQueue     *self,
+                                   const GskGLDrawVertex  vertices[GSK_GL_N_VERTICES])
+{
+  GskGLCommandBatch *batch;
+  GskGLDrawVertex *dest;
+  guint offset;
+
+  g_return_val_if_fail (GSK_IS_GL_COMMAND_QUEUE (self), NULL);
+  g_return_val_if_fail (self->in_draw == TRUE, NULL);
+
+  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  batch->draw.vbo_count += GSK_GL_N_VERTICES;
+
+  dest = gsk_gl_buffer_advance (self->vertices, GSK_GL_N_VERTICES, &offset);
+
+  if (vertices != NULL)
+    {
+      memcpy (dest, vertices, sizeof (GskGLDrawVertex) * GSK_GL_N_VERTICES);
+      return NULL;
+    }
+
+  return dest;
+}
+
+void
+gsk_gl_command_queue_clear (GskGLCommandQueue *self,
+                            guint              clear_bits)
+{
+  GskGLCommandBatch *batch;
+
+  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (self->in_draw == FALSE);
+  g_return_if_fail (self->batches->len < G_MAXINT);
+
+  if (clear_bits == 0)
+    clear_bits = GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
+
+  g_array_set_size (self->batches, self->batches->len + 1);
+
+  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  batch->kind = GSK_GL_COMMAND_KIND_CLEAR;
+  batch->clear.bits = clear_bits;
+  batch->clear.framebuffer = self->attachments->fbo.id;
+  batch->next_batch_index = -1;
+  batch->program = 0;
+
+  self->attachments->fbo.changed = FALSE;
+}
+
+void
+gsk_gl_command_queue_push_debug_group (GskGLCommandQueue *self,
+                                       const char        *debug_group)
+{
+  GskGLCommandBatch *batch;
+
+  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (self->in_draw == FALSE);
+  g_return_if_fail (self->batches->len < G_MAXINT);
+
+  g_array_set_size (self->batches, self->batches->len + 1);
+
+  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  batch->kind = GSK_GL_COMMAND_KIND_PUSH_DEBUG_GROUP;
+  batch->debug_group = g_string_chunk_insert (self->debug_groups, debug_group);
+  batch->next_batch_index = -1;
+  batch->program = 0;
+}
+
+void
+gsk_gl_command_queue_pop_debug_group (GskGLCommandQueue *self)
+{
+  GskGLCommandBatch *batch;
+
+  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (self->in_draw == FALSE);
+  g_return_if_fail (self->batches->len < G_MAXINT);
+
+  g_array_set_size (self->batches, self->batches->len + 1);
+
+  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  batch->kind = GSK_GL_COMMAND_KIND_POP_DEBUG_GROUP;
+  batch->debug_group = NULL;
+  batch->next_batch_index = -1;
+  batch->program = 0;
 }
 
 GdkGLContext *
@@ -692,30 +523,6 @@ gsk_gl_command_queue_make_current (GskGLCommandQueue *self)
 }
 
 void
-gsk_gl_command_queue_use_program (GskGLCommandQueue *self,
-                                  guint              program)
-{
-  GskGLCommandBatch *batch;
-
-  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
-
-  batch = gsk_gl_command_queue_get_batch (self);
-
-  if (batch->program == program || program == 0)
-    return;
-
-  if (batch->n_draws == 0)
-    {
-      batch->program = program;
-      return;
-    }
-
-  batch = gsk_gl_command_queue_advance (self, program);
-  batch->program = program;
-  batch->program_changed = TRUE;
-}
-
-void
 gsk_gl_command_queue_delete_program (GskGLCommandQueue *self,
                                      guint              program)
 {
@@ -723,30 +530,6 @@ gsk_gl_command_queue_delete_program (GskGLCommandQueue *self,
 
   glDeleteProgram (program);
   gsk_gl_uniform_state_clear_program (self->uniforms, program);
-}
-
-GskGLDrawVertex *
-gsk_gl_command_queue_draw (GskGLCommandQueue    *self,
-                           const GskGLDrawVertex  vertices[6])
-{
-  GskGLCommandBatch *batch;
-  GskGLDrawVertex *dest;
-  guint offset;
-
-  g_return_val_if_fail (GSK_IS_GL_COMMAND_QUEUE (self), NULL);
-
-  batch = gsk_gl_command_queue_get_batch (self);
-  dest = gsk_gl_buffer_advance (self->vertices, 6, &offset);
-
-  gsk_gl_command_batch_draw (batch, offset, 6);
-
-  if (vertices != NULL)
-    {
-      memcpy (dest, vertices, sizeof (GskGLDrawVertex) * 6);
-      return NULL;
-    }
-
-  return dest;
 }
 
 void
@@ -982,20 +765,14 @@ gsk_gl_command_queue_set_uniform_rounded_rect (GskGLCommandQueue    *self,
 void
 gsk_gl_command_queue_execute (GskGLCommandQueue *self)
 {
-  GskGLCommandBatch *last_batch;
   GLuint vao_id;
+  int next_batch_index;
 
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (self->in_draw == FALSE);
 
-  if (self->all_batches.length == 0)
+  if (self->batches->len == 0)
     return;
-
-  /* First advance the queue to ensure that we have stashed all the
-   * state we need and possibly merged the final batch.
-   */
-  last_batch = gsk_gl_command_queue_get_batch (self);
-  if (last_batch->program != 0 && last_batch->n_draws > 0)
-    gsk_gl_command_queue_advance (self, 0);
 
   gsk_gl_command_queue_make_current (self);
 
@@ -1024,12 +801,34 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
                          sizeof (GskGLDrawVertex),
                          (void *) G_STRUCT_OFFSET (GskGLDrawVertex, uv));
 
-  for (const GList *iter = self->all_batches.head; iter != NULL; iter = iter->next)
-    {
-      GskGLCommandBatch *batch = self->all_batches.head->data;
+  next_batch_index = 0;
 
-      if (batch->n_draws > 0)
-        gsk_gl_command_batch_execute (batch, self->uniforms);
+  while (next_batch_index >= 0)
+    {
+      const GskGLCommandBatch *batch = &g_array_index (self->batches, GskGLCommandBatch, next_batch_index);
+
+      switch (batch->kind)
+        {
+        case GSK_GL_COMMAND_KIND_CLEAR:
+          glClear (batch->clear.bits);
+          break;
+
+        case GSK_GL_COMMAND_KIND_PUSH_DEBUG_GROUP:
+          gdk_gl_context_push_debug_group (self->context, batch->debug_group);
+          break;
+
+        case GSK_GL_COMMAND_KIND_POP_DEBUG_GROUP:
+          gdk_gl_context_pop_debug_group (self->context);
+          break;
+
+        case GSK_GL_COMMAND_KIND_DRAW:
+          break;
+
+        default:
+          g_assert_not_reached ();
+        }
+
+      next_batch_index = batch->next_batch_index;
     }
 
   glDeleteVertexArrays (1, &vao_id);
@@ -1039,6 +838,8 @@ void
 gsk_gl_command_queue_begin_frame (GskGLCommandQueue *self)
 {
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+
+  self->tail_batch_index = -1;
 
   glBindFramebuffer (GL_FRAMEBUFFER, 0);
 
@@ -1069,13 +870,9 @@ gsk_gl_command_queue_end_frame (GskGLCommandQueue *self)
 {
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
 
-  while (self->all_batches.length > 0)
-    {
-      GskGLCommandBatch *batch = self->all_batches.head->data;
-      gsk_gl_command_queue_release_batch (self, batch);
-    }
-
   gsk_gl_uniform_state_end_frame (self->uniforms);
+
+  self->batches->len = 0;
 
   /* Release autoreleased framebuffers */
   if (self->autorelease_framebuffers->len > 0)
@@ -1087,100 +884,17 @@ gsk_gl_command_queue_end_frame (GskGLCommandQueue *self)
     glDeleteTextures (self->autorelease_textures->len,
                       (GLuint *)(gpointer)self->autorelease_textures->data);
 
-  /* Allocate first batch for next round so we never have an empty
-   * GskGLCommandQueue.all_batches array to check for elsewhere.
-   */
-  gsk_gl_command_queue_advance (self, 0);
+  g_string_chunk_clear (self->debug_groups);
 }
 
 void
-gsk_gl_command_queue_bind_framebuffer (GskGLCommandQueue *self,
-                                       guint              framebuffer)
+gsk_gl_command_queue_change_viewport (GskGLCommandQueue     *self,
+                                      const graphene_rect_t *viewport)
 {
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (viewport != NULL);
 
-  gsk_gl_attachment_state_bind_framebuffer (self->attachments, framebuffer);
-}
-
-void
-gsk_gl_command_queue_set_viewport (GskGLCommandQueue     *self,
-                                   const graphene_rect_t *viewport)
-{
-  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
-
-  /* TODO: Set viewport as part of batch */
-}
-
-static void
-gsk_gl_command_queue_save (GskGLCommandQueue *self)
-{
-  g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
-
-  g_ptr_array_add (self->saved_state,
-                   gsk_gl_attachment_state_save (self->attachments));
-}
-
-static void
-gsk_gl_command_queue_restore (GskGLCommandQueue *self)
-{
-  GskGLAttachmentState *saved;
-
-  g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
-  g_assert (self->saved_state->len > 0);
-
-  saved = g_ptr_array_steal_index (self->saved_state,
-                                   self->saved_state->len - 1);
-
-  gsk_gl_attachment_state_restore (saved);
-}
-
-int
-gsk_gl_command_queue_create_texture (GskGLCommandQueue *self,
-                                     int                width,
-                                     int                height,
-                                     int                min_filter,
-                                     int                mag_filter)
-{
-  GLuint texture_id;
-
-  g_return_val_if_fail (GSK_IS_GL_COMMAND_QUEUE (self), -1);
-
-  if (width > self->max_texture_size || height > self->max_texture_size)
-    return -1;
-
-  gsk_gl_command_queue_save (self);
-  gsk_gl_command_queue_make_current (self);
-
-  glGenTextures (1, &texture_id);
-
-  glActiveTexture (GL_TEXTURE0);
-  glBindTexture (GL_TEXTURE_2D, texture_id);
-
-  glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter);
-  glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_filter);
-  glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  if (gdk_gl_context_get_use_es (self->context))
-    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-  else
-    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
-
-  gsk_gl_command_queue_restore (self);
-
-  return (int)texture_id;
-}
-
-guint
-gsk_gl_command_queue_create_framebuffer (GskGLCommandQueue *self)
-{
-  GLuint fbo_id;
-
-  g_return_val_if_fail (GSK_IS_GL_COMMAND_QUEUE (self), -1);
-
-  gsk_gl_command_queue_make_current (self);
-  glGenFramebuffers (1, &fbo_id);
-  return fbo_id;
+  
 }
 
 gboolean
@@ -1245,20 +959,62 @@ gsk_gl_command_queue_autorelease_texture (GskGLCommandQueue *self,
   g_array_append_val (self->autorelease_textures, texture_id);
 }
 
-void
-gsk_gl_command_queue_clear (GskGLCommandQueue *self)
+int
+gsk_gl_command_queue_create_texture (GskGLCommandQueue *self,
+                                     int                width,
+                                     int                height,
+                                     int                min_filter,
+                                     int                mag_filter)
 {
-  GskGLCommandBatch *batch;
+  GLuint texture_id;
 
+  g_return_val_if_fail (GSK_IS_GL_COMMAND_QUEUE (self), -1);
+
+  if (width > self->max_texture_size || height > self->max_texture_size)
+    return -1;
+
+  gsk_gl_command_queue_save (self);
+  gsk_gl_command_queue_make_current (self);
+
+  glGenTextures (1, &texture_id);
+
+  glActiveTexture (GL_TEXTURE0);
+  glBindTexture (GL_TEXTURE_2D, texture_id);
+
+  glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min_filter);
+  glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag_filter);
+  glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  if (gdk_gl_context_get_use_es (self->context))
+    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  else
+    glTexImage2D (GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+
+  gsk_gl_command_queue_restore (self);
+
+  return (int)texture_id;
+}
+
+guint
+gsk_gl_command_queue_create_framebuffer (GskGLCommandQueue *self)
+{
+  GLuint fbo_id;
+
+  g_return_val_if_fail (GSK_IS_GL_COMMAND_QUEUE (self), -1);
+
+  gsk_gl_command_queue_make_current (self);
+
+  glGenFramebuffers (1, &fbo_id);
+
+  return fbo_id;
+}
+
+void
+gsk_gl_command_queue_bind_framebuffer (GskGLCommandQueue *self,
+                                       guint              framebuffer)
+{
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
 
-  batch = gsk_gl_command_queue_get_batch (self);
-
-  if (batch->is_clear)
-    return;
-
-  if (gsk_gl_command_queue_batch_is_complete (self))
-    batch = gsk_gl_command_queue_advance (self, 0);
-
-  batch->is_clear = TRUE;
+  gsk_gl_attachment_state_bind_framebuffer (self->attachments, framebuffer);
 }

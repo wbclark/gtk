@@ -28,13 +28,14 @@ G_BEGIN_DECLS
 
 typedef struct _GskGLBuffer GskGLBuffer;
 
-GskGLBuffer *gsk_gl_buffer_new     (GLenum       target,
-                                    guint        element_size);
-void         gsk_gl_buffer_free    (GskGLBuffer *buffer);
-void         gsk_gl_buffer_submit  (GskGLBuffer *buffer);
-gpointer     gsk_gl_buffer_advance (GskGLBuffer *buffer,
-                                    guint        count,
-                                    guint       *offset);
+GskGLBuffer *gsk_gl_buffer_new        (GLenum       target,
+                                       guint        element_size);
+void         gsk_gl_buffer_free       (GskGLBuffer *buffer);
+void         gsk_gl_buffer_submit     (GskGLBuffer *buffer);
+guint        gsk_gl_buffer_get_offset (GskGLBuffer *buffer);
+gpointer     gsk_gl_buffer_advance    (GskGLBuffer *buffer,
+                                       guint        count,
+                                       guint       *offset);
 
 G_END_DECLS
 

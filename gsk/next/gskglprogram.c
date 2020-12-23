@@ -85,35 +85,6 @@ gsk_gl_program_init (GskGLProgram *self)
 }
 
 /**
- * gsk_gl_program_use:
- * @self: a #GskGLProgram
- *
- * Sets @self as the current program.
- */
-void
-gsk_gl_program_use (GskGLProgram *self)
-{
-  g_return_if_fail (GSK_IS_GL_PROGRAM (self));
-  g_return_if_fail (self->command_queue != NULL);
-
-  gsk_gl_command_queue_use_program (self->command_queue, self->id);
-}
-
-/**
- * gsk_gl_program_unuse:
- * @self: a #GskGLProgram
- *
- * Changes the program to 0 and cleans up any necessary state.
- */
-void
-gsk_gl_program_unuse (GskGLProgram *self)
-{
-  g_return_if_fail (GSK_IS_GL_PROGRAM (self));
-
-  gsk_gl_command_queue_use_program (self->command_queue, 0);
-}
-
-/**
  * gsk_gl_program_add_uniform:
  * @self: a #GskGLProgram
  * @name: the name of the uniform such as "u_source"
@@ -351,11 +322,27 @@ gsk_gl_program_set_uniform_rounded_rect (GskGLProgram         *self,
                                                  rounded_rect);
 }
 
-GskGLDrawVertex *
-gsk_gl_program_draw (GskGLProgram          *self,
-                     const GskGLDrawVertex  vertices[6])
+void
+gsk_gl_program_begin_draw (GskGLProgram *self)
 {
   g_assert (GSK_IS_GL_PROGRAM (self));
 
-  return gsk_gl_command_queue_draw (self->command_queue, vertices);
+  return gsk_gl_command_queue_begin_draw (self->command_queue, self->id);
+}
+
+void
+gsk_gl_program_end_draw (GskGLProgram *self)
+{
+  g_assert (GSK_IS_GL_PROGRAM (self));
+
+  return gsk_gl_command_queue_end_draw (self->command_queue);
+}
+
+GskGLDrawVertex *
+gsk_gl_program_add_vertices (GskGLProgram                   *self,
+                             const GskGLDrawVertex vertices[GSK_GL_N_VERTICES])
+{
+  g_assert (GSK_IS_GL_PROGRAM (self));
+
+  return gsk_gl_command_queue_add_vertices (self->command_queue, vertices);
 }

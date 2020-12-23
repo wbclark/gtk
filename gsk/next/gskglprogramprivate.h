@@ -29,64 +29,64 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE (GskGLProgram, gsk_gl_program, GSK, GL_PROGRAM, GObject)
 
-GskGLProgram    *gsk_gl_program_new                      (GskGLCommandQueue    *command_queue,
-                                                          const char           *name,
-                                                          int                   program_id);
-gboolean         gsk_gl_program_add_uniform              (GskGLProgram         *self,
-                                                          const char           *name,
-                                                          guint                 key);
-void             gsk_gl_program_use                      (GskGLProgram         *self);
-void             gsk_gl_program_unuse                    (GskGLProgram         *self);
-void             gsk_gl_program_delete                   (GskGLProgram         *self);
-void             gsk_gl_program_set_uniform1i            (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          int                   value0);
-void             gsk_gl_program_set_uniform2i            (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          int                   value0,
-                                                          int                   value1);
-void             gsk_gl_program_set_uniform3i            (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          int                   value0,
-                                                          int                   value1,
-                                                          int                   value2);
-void             gsk_gl_program_set_uniform4i            (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          int                   value0,
-                                                          int                   value1,
-                                                          int                   value2,
-                                                          int                   value3);
-void             gsk_gl_program_set_uniform1f            (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          float                 value0);
-void             gsk_gl_program_set_uniform2f            (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          float                 value0,
-                                                          float                 value1);
-void             gsk_gl_program_set_uniform3f            (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          float                 value0,
-                                                          float                 value1,
-                                                          float                 value2);
-void             gsk_gl_program_set_uniform4f            (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          float                 value0,
-                                                          float                 value1,
-                                                          float                 value2,
-                                                          float                 value3);
-void             gsk_gl_program_set_uniform_color        (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          const GdkRGBA        *color);
-void             gsk_gl_program_set_uniform_texture      (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          GLenum                texture_target,
-                                                          GLenum                texture_slot,
-                                                          guint                 texture_id);
-void             gsk_gl_program_set_uniform_rounded_rect (GskGLProgram         *self,
-                                                          guint                 key,
-                                                          const GskRoundedRect *rounded_rect);
-GskGLDrawVertex *gsk_gl_program_draw                     (GskGLProgram          *self,
-                                                          const GskGLDrawVertex  vertices[6]);
+GskGLProgram    *gsk_gl_program_new                      (GskGLCommandQueue     *command_queue,
+                                                          const char            *name,
+                                                          int                    program_id);
+gboolean         gsk_gl_program_add_uniform              (GskGLProgram          *self,
+                                                          const char            *name,
+                                                          guint                  key);
+void             gsk_gl_program_delete                   (GskGLProgram          *self);
+void             gsk_gl_program_set_uniform1i            (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          int                    value0);
+void             gsk_gl_program_set_uniform2i            (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          int                    value0,
+                                                          int                    value1);
+void             gsk_gl_program_set_uniform3i            (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          int                    value0,
+                                                          int                    value1,
+                                                          int                    value2);
+void             gsk_gl_program_set_uniform4i            (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          int                    value0,
+                                                          int                    value1,
+                                                          int                    value2,
+                                                          int                    value3);
+void             gsk_gl_program_set_uniform1f            (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          float                  value0);
+void             gsk_gl_program_set_uniform2f            (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          float                  value0,
+                                                          float                  value1);
+void             gsk_gl_program_set_uniform3f            (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          float                  value0,
+                                                          float                  value1,
+                                                          float                  value2);
+void             gsk_gl_program_set_uniform4f            (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          float                  value0,
+                                                          float                  value1,
+                                                          float                  value2,
+                                                          float                  value3);
+void             gsk_gl_program_set_uniform_color        (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          const GdkRGBA         *color);
+void             gsk_gl_program_set_uniform_texture      (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          GLenum                 texture_target,
+                                                          GLenum                 texture_slot,
+                                                          guint                  texture_id);
+void             gsk_gl_program_set_uniform_rounded_rect (GskGLProgram          *self,
+                                                          guint                  key,
+                                                          const GskRoundedRect  *rounded_rect);
+void             gsk_gl_program_begin_draw               (GskGLProgram          *self);
+void             gsk_gl_program_end_draw                 (GskGLProgram          *self);
+GskGLDrawVertex *gsk_gl_program_add_vertices             (GskGLProgram          *self,
+                                                          const GskGLDrawVertex  vertices[GSK_GL_N_VERTICES]);
 
 G_END_DECLS
 

@@ -38,6 +38,7 @@
 struct _GskGLRenderJob
 {
   GskNextDriver     *driver;
+  GskGLCommandQueue *command_queue;
   cairo_region_t    *region;
   guint              framebuffer;
   graphene_rect_t    viewport;
@@ -334,6 +335,7 @@ gsk_gl_render_job_new (GskNextDriver         *driver,
 
   job = g_slice_new0 (GskGLRenderJob);
   job->driver = g_object_ref (driver);
+  job->command_queue = driver->command_queue;
   job->clip = g_array_new (FALSE, FALSE, sizeof (GskGLRenderClip));
   job->modelview = g_array_new (FALSE, FALSE, sizeof (GskGLRenderModelview));
   job->framebuffer = framebuffer;
@@ -442,11 +444,74 @@ gsk_gl_render_job_visit_node (GskGLRenderJob *job,
 {
   g_assert (job != NULL);
   g_assert (node != NULL);
+  g_assert (GSK_IS_NEXT_DRIVER (job->driver));
+  g_assert (GSK_IS_GL_COMMAND_QUEUE (job->command_queue));
 
   if (node_is_invisible (node) ||
       !gsk_gl_render_job_node_overlaps_clip (job, node))
     return;
 
+  switch (gsk_render_node_get_node_type (node))
+    {
+    case GSK_CONTAINER_NODE:
+      {
+        guint i;
+        guint p;
+
+        for (i = 0, p = gsk_container_node_get_n_children (node);
+             i < p;
+             i ++)
+          {
+            GskRenderNode *child = gsk_container_node_get_child (node, i);
+            gsk_gl_render_job_visit_node (job, child);
+          }
+      }
+    break;
+
+    case GSK_DEBUG_NODE:
+      {
+        const char *message = gsk_debug_node_get_message (node);
+
+        if (message != NULL)
+          gsk_gl_command_queue_push_debug_group (job->command_queue, message);
+
+        gsk_gl_render_job_visit_node (job, gsk_debug_node_get_child (node));
+
+        if (message != NULL)
+          gsk_gl_command_queue_pop_debug_group (job->command_queue);
+      }
+    break;
+
+    case GSK_CAIRO_NODE:
+    case GSK_COLOR_NODE:
+    case GSK_LINEAR_GRADIENT_NODE:
+    case GSK_REPEATING_LINEAR_GRADIENT_NODE:
+    case GSK_RADIAL_GRADIENT_NODE:
+    case GSK_REPEATING_RADIAL_GRADIENT_NODE:
+    case GSK_CONIC_GRADIENT_NODE:
+    case GSK_BORDER_NODE:
+    case GSK_TEXTURE_NODE:
+    case GSK_INSET_SHADOW_NODE:
+    case GSK_OUTSET_SHADOW_NODE:
+    case GSK_TRANSFORM_NODE:
+    case GSK_OPACITY_NODE:
+    case GSK_COLOR_MATRIX_NODE:
+    case GSK_REPEAT_NODE:
+    case GSK_CLIP_NODE:
+    case GSK_ROUNDED_CLIP_NODE:
+    case GSK_SHADOW_NODE:
+    case GSK_BLEND_NODE:
+    case GSK_CROSS_FADE_NODE:
+    case GSK_TEXT_NODE:
+    case GSK_BLUR_NODE:
+    case GSK_GL_SHADER_NODE:
+    break;
+
+    case GSK_NOT_A_RENDER_NODE:
+    default:
+      g_assert_not_reached ();
+    break;
+    }
 
 
 }
@@ -455,7 +520,6 @@ void
 gsk_gl_render_job_prepare (GskGLRenderJob *job,
                            GskRenderNode  *root)
 {
-  GskGLCommandQueue *command_queue;
   GdkGLContext *context;
 
   g_return_if_fail (job != NULL);
@@ -463,13 +527,12 @@ gsk_gl_render_job_prepare (GskGLRenderJob *job,
   g_return_if_fail (GSK_IS_NEXT_DRIVER (job->driver));
 
   context = gsk_next_driver_get_context (job->driver);
-  command_queue = job->driver->command_queue;
 
   gdk_gl_context_push_debug_group (context, "Adding render ops");
 
-  gsk_gl_command_queue_bind_framebuffer (command_queue, job->framebuffer);
-  gsk_gl_command_queue_set_viewport (command_queue, &job->viewport);
-  gsk_gl_command_queue_clear (command_queue);
+  gsk_gl_command_queue_bind_framebuffer (job->command_queue, job->framebuffer);
+  gsk_gl_command_queue_change_viewport (job->command_queue, &job->viewport);
+  gsk_gl_command_queue_clear (job->command_queue, 0);
 
   gsk_gl_render_job_visit_node (job, root);
 
@@ -483,6 +546,6 @@ gsk_gl_render_job_render (GskGLRenderJob *job)
   g_return_if_fail (GSK_IS_NEXT_DRIVER (job->driver));
 
   gsk_next_driver_begin_frame (job->driver);
-  gsk_gl_command_queue_execute (job->driver->command_queue);
+  gsk_gl_command_queue_execute (job->command_queue);
   gsk_next_driver_end_frame (job->driver);
 }

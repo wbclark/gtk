@@ -169,3 +169,11 @@ gsk_gl_buffer_advance (GskGLBuffer *buffer,
   g_array_set_size (buffer->buffer, buffer->buffer->len + count);
   return (guint8 *)buffer->buffer->data + (*offset * g_array_get_element_size (buffer->buffer));
 }
+
+guint
+gsk_gl_buffer_get_offset (GskGLBuffer *buffer)
+{
+  g_return_val_if_fail (buffer != NULL, 0);
+
+  return buffer->buffer->len;
+}
