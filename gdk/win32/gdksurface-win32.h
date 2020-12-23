@@ -257,16 +257,16 @@ struct _GdkWin32Surface
   int initial_y;
 
   /* left/right/top/bottom width of the shadow/resize-grip around the window */
-  RECT margins;
+  RECT shadow;
 
-  /* left+right and top+bottom from @margins */
-  int margins_x;
-  int margins_y;
+  /* left+right and top+bottom from @shadow */
+  int shadow_x;
+  int shadow_y;
 
-  /* Set to TRUE when GTK tells us that margins are 0 everywhere.
-   * We don't actually set margins to 0, we just set this bit.
+  /* Set to TRUE when GTK tells us that shadow are 0 everywhere.
+   * We don't actually set shadow to 0, we just set this bit.
    */
-  guint zero_margins : 1;
+  guint zero_shadow : 1;
   guint inhibit_configure : 1;
 
   /* If TRUE, the @temp_styles is set to the styles that were temporarily
@@ -329,6 +329,19 @@ struct _GdkWin32Surface
   int surface_scale;
   int unscaled_width;
   int unscaled_height;
+
+  /* Surface sizing */
+  int last_computed_width;
+  int last_computed_height;
+
+  GdkToplevelLayout *toplevel_layout;
+  
+  struct {
+    int configured_width;
+    int configured_height;
+    gboolean configure_pending;
+    gboolean surface_geometry_dirty;
+  } next_layout;
 
 #ifdef GDK_WIN32_ENABLE_EGL
   EGLSurface egl_surface;
