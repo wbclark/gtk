@@ -337,12 +337,3 @@ gsk_gl_program_end_draw (GskGLProgram *self)
 
   return gsk_gl_command_queue_end_draw (self->command_queue);
 }
-
-GskGLDrawVertex *
-gsk_gl_program_add_vertices (GskGLProgram                   *self,
-                             const GskGLDrawVertex vertices[GSK_GL_N_VERTICES])
-{
-  g_assert (GSK_IS_GL_PROGRAM (self));
-
-  return gsk_gl_command_queue_add_vertices (self->command_queue, vertices);
-}

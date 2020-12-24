@@ -85,8 +85,6 @@ void             gsk_gl_program_set_uniform_rounded_rect (GskGLProgram          
                                                           const GskRoundedRect  *rounded_rect);
 void             gsk_gl_program_begin_draw               (GskGLProgram          *self);
 void             gsk_gl_program_end_draw                 (GskGLProgram          *self);
-GskGLDrawVertex *gsk_gl_program_add_vertices             (GskGLProgram          *self,
-                                                          const GskGLDrawVertex  vertices[GSK_GL_N_VERTICES]);
 
 G_END_DECLS
 

@@ -756,6 +756,94 @@ gsk_gl_command_queue_set_uniform_rounded_rect (GskGLCommandQueue    *self,
                                          rounded_rect);
 }
 
+static void
+apply_uniform (GskGLUniformState      *state,
+               const GskGLUniformInfo *info,
+               guint                   location)
+{
+  const union {
+    graphene_matrix_t matrix[0];
+    GskRoundedRect rounded_rect[0];
+    float fval[0];
+    int ival[0];
+  } *data;
+
+  data = gsk_gl_uniform_state_get_uniform_data (state, info->offset);
+
+  switch (info->format)
+    {
+    case GSK_GL_UNIFORM_FORMAT_1F:
+      glUniform1f (location, data->fval[0]);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_2F:
+      glUniform2f (location, data->fval[0], data->fval[1]);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_3F:
+      glUniform3f (location, data->fval[0], data->fval[1], data->fval[2]);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_4F:
+      glUniform4f (location, data->fval[0], data->fval[1], data->fval[2], data->fval[3]);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_1FV:
+      glUniform1fv (location, info->array_count, data->fval);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_2FV:
+      glUniform2fv (location, info->array_count, data->fval);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_3FV:
+      glUniform3fv (location, info->array_count, data->fval);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_4FV:
+      glUniform4fv (location, info->array_count, data->fval);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_1I:
+    case GSK_GL_UNIFORM_FORMAT_TEXTURE:
+      glUniform1i (location, data->ival[0]);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_2I:
+      glUniform2i (location, data->ival[0], data->ival[1]);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_3I:
+      glUniform3i (location, data->ival[0], data->ival[1], data->ival[2]);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_4I:
+      glUniform4i (location, data->ival[0], data->ival[1], data->ival[2], data->ival[3]);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_MATRIX: {
+      float mat[16];
+      graphene_matrix_to_float (&data->matrix[0], mat);
+      glUniformMatrix4fv (location, 1, GL_FALSE, mat);
+      break;
+    }
+
+    case GSK_GL_UNIFORM_FORMAT_COLOR:
+      glUniform4fv (location, 1, &data->fval[0]);
+      break;
+
+    case GSK_GL_UNIFORM_FORMAT_ROUNDED_RECT:
+      if (info->flags & GSK_GL_UNIFORM_FLAGS_SEND_CORNERS)
+        glUniform4fv (location, 3, (const float *)&data->rounded_rect[0]);
+      else
+        glUniform4fv (location, 1, (const float *)&data->rounded_rect[0]);
+      break;
+
+    default:
+      g_assert_not_reached ();
+    }
+}
+
 /**
  * gsk_gl_command_queue_execute:
  * @self: a #GskGLCommandQueue
@@ -765,6 +853,7 @@ gsk_gl_command_queue_set_uniform_rounded_rect (GskGLCommandQueue    *self,
 void
 gsk_gl_command_queue_execute (GskGLCommandQueue *self)
 {
+  GLuint framebuffer = 0;
   GLuint vao_id;
   int next_batch_index;
 
@@ -801,6 +890,9 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
                          sizeof (GskGLDrawVertex),
                          (void *) G_STRUCT_OFFSET (GskGLDrawVertex, uv));
 
+  /* Start with default framebuffer */
+  glBindFramebuffer (GL_FRAMEBUFFER, 0);
+
   next_batch_index = 0;
 
   while (next_batch_index >= 0)
@@ -822,6 +914,37 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
           break;
 
         case GSK_GL_COMMAND_KIND_DRAW:
+          if (batch->draw.framebuffer != framebuffer)
+            {
+              framebuffer = batch->draw.framebuffer;
+              glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
+            }
+
+          if (batch->draw.bind_count > 0)
+            {
+              for (guint i = 0; i < batch->draw.bind_count; i++)
+                {
+                  guint index = batch->draw.bind_offset + i;
+                  GskGLCommandBind *bind = &g_array_index (self->batch_binds, GskGLCommandBind, index);
+
+                  glActiveTexture (GL_TEXTURE0 + bind->texture);
+                  glBindTexture (GL_TEXTURE_2D, bind->id);
+                }
+            }
+
+          if (batch->draw.uniform_count > 0)
+            {
+              for (guint i = 0; i < batch->draw.uniform_count; i++)
+                {
+                  guint index = batch->draw.uniform_offset + i;
+                  GskGLCommandUniform *u = &g_array_index (self->batch_uniforms, GskGLCommandUniform, index);
+
+                  apply_uniform (self->uniforms, &u->info, u->location);
+                }
+            }
+
+          glDrawArrays (GL_TRIANGLES, batch->draw.vbo_offset, batch->draw.vbo_count);
+
           break;
 
         default:
