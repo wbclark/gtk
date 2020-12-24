@@ -902,6 +902,12 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
       switch (batch->kind)
         {
         case GSK_GL_COMMAND_KIND_CLEAR:
+          if (framebuffer != batch->clear.framebuffer)
+            {
+              framebuffer = batch->clear.framebuffer;
+              glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
+            }
+
           glClear (batch->clear.bits);
           break;
 
