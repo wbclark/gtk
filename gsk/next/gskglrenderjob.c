@@ -517,8 +517,8 @@ gsk_gl_render_job_visit_node (GskGLRenderJob *job,
 }
 
 void
-gsk_gl_render_job_prepare (GskGLRenderJob *job,
-                           GskRenderNode  *root)
+gsk_gl_render_job_render (GskGLRenderJob *job,
+                          GskRenderNode  *root)
 {
   GdkGLContext *context;
 
@@ -528,24 +528,19 @@ gsk_gl_render_job_prepare (GskGLRenderJob *job,
 
   context = gsk_next_driver_get_context (job->driver);
 
-  gdk_gl_context_push_debug_group (context, "Adding render ops");
+  gsk_next_driver_begin_frame (job->driver);
 
   gsk_gl_command_queue_bind_framebuffer (job->command_queue, job->framebuffer);
   gsk_gl_command_queue_change_viewport (job->command_queue, &job->viewport);
   gsk_gl_command_queue_clear (job->command_queue, 0);
 
+  gdk_gl_context_push_debug_group (context, "Building command queue");
   gsk_gl_render_job_visit_node (job, root);
-
   gdk_gl_context_pop_debug_group (context);
-}
 
-void
-gsk_gl_render_job_render (GskGLRenderJob *job)
-{
-  g_return_if_fail (job != NULL);
-  g_return_if_fail (GSK_IS_NEXT_DRIVER (job->driver));
-
-  gsk_next_driver_begin_frame (job->driver);
+  gdk_gl_context_push_debug_group (context, "Executing command queue");
   gsk_gl_command_queue_execute (job->command_queue);
+  gdk_gl_context_pop_debug_group (context);
+
   gsk_next_driver_end_frame (job->driver);
 }

@@ -30,8 +30,7 @@ GskGLRenderJob *gsk_gl_render_job_new     (GskNextDriver         *driver,
                                            guint                  framebuffer,
                                            gboolean               flip_y);
 void            gsk_gl_render_job_free    (GskGLRenderJob        *job);
-void            gsk_gl_render_job_prepare (GskGLRenderJob        *job,
+void            gsk_gl_render_job_render  (GskGLRenderJob        *job,
                                            GskRenderNode         *root);
-void            gsk_gl_render_job_render  (GskGLRenderJob        *job);
 
 #endif /* __GSK_GL_RENDER_JOB_H__ */
