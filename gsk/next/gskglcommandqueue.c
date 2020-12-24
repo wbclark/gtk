@@ -838,6 +838,7 @@ void
 gsk_gl_command_queue_begin_frame (GskGLCommandQueue *self)
 {
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (self->batches->len == 0);
 
   self->tail_batch_index = -1;
 
@@ -869,10 +870,9 @@ void
 gsk_gl_command_queue_end_frame (GskGLCommandQueue *self)
 {
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (self->saved_state->len == 0);
 
   gsk_gl_uniform_state_end_frame (self->uniforms);
-
-  self->batches->len = 0;
 
   /* Release autoreleased framebuffers */
   if (self->autorelease_framebuffers->len > 0)
@@ -885,6 +885,13 @@ gsk_gl_command_queue_end_frame (GskGLCommandQueue *self)
                       (GLuint *)(gpointer)self->autorelease_textures->data);
 
   g_string_chunk_clear (self->debug_groups);
+
+  self->batches->len = 0;
+  self->batch_draws->len = 0;
+  self->batch_uniforms->len = 0;
+  self->batch_binds->len = 0;
+  self->autorelease_framebuffers->len = 0;
+  self->autorelease_textures->len = 0;
 }
 
 void
