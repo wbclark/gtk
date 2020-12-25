@@ -54,7 +54,7 @@
 #include "gtkwindow.h"
 #include "gtkpopovermenu.h"
 #include "gtknative.h"
-#include "gtkdragsource.h"
+#include "gtkdragsourceprivate.h"
 #include "gtkdragicon.h"
 #include "gtkcsscolorvalueprivate.h"
 
@@ -4138,7 +4138,7 @@ gtk_label_drag_gesture_update (GtkGestureDrag *gesture,
 
   if (info->in_drag)
     {
-      if (gtk_drag_check_threshold (widget, info->drag_start_x, info->drag_start_y, x, y))
+      if (gtk_drag_check_threshold_double (widget, info->drag_start_x, info->drag_start_y, x, y))
 	{
           GdkDrag *drag;
           GdkSurface *surface;

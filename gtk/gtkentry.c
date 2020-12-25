@@ -66,7 +66,7 @@
 #include "gtkwindow.h"
 #include "gtknative.h"
 #include "gtkgestureclick.h"
-#include "gtkdragsource.h"
+#include "gtkdragsourceprivate.h"
 #include "gtkdragicon.h"
 #include "gtkwidgetpaintable.h"
 
@@ -1601,7 +1601,7 @@ icon_drag_update_cb (GtkGestureDrag *gesture,
   icon_info = priv->icons[pos];
 
   if (icon_info->content != NULL &&
-      gtk_drag_check_threshold (icon_info->widget, start_x, start_y, x, y))
+      gtk_drag_check_threshold_double (icon_info->widget, 0, 0, x, y))
     {
       GdkPaintable *paintable;
       GdkSurface *surface;
