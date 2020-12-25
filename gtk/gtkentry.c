@@ -1563,8 +1563,6 @@ icon_pressed_cb (GtkGestureClick *gesture,
 
   if (!icon_info->nonactivatable)
     g_signal_emit (entry, signals[ICON_PRESS], 0, pos);
-
-  gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
 static void
@@ -1577,6 +1575,8 @@ icon_released_cb (GtkGestureClick *gesture,
   GtkEntryPrivate *priv = gtk_entry_get_instance_private (entry);
   GtkEntryIconPosition pos;
   EntryIconInfo *icon_info;
+
+  gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 
   pos = get_icon_position_from_controller (entry, GTK_EVENT_CONTROLLER (gesture));
   icon_info = priv->icons[pos];
