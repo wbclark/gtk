@@ -319,6 +319,8 @@ gtk_gesture_stylus_get_backlog (GtkGestureStylus  *gesture,
   GArray *backlog_array;
   GdkTimeCoord *history = NULL;
   guint n_coords = 0, i;
+  GtkWidget *event_widget;
+  GtkWidget *controller_widget;
 
   g_return_val_if_fail (GTK_IS_GESTURE_STYLUS (gesture), FALSE);
   g_return_val_if_fail (backlog != NULL && n_elems != NULL, FALSE);
@@ -332,6 +334,8 @@ gtk_gesture_stylus_get_backlog (GtkGestureStylus  *gesture,
     return FALSE;
 
   backlog_array = g_array_new (FALSE, FALSE, sizeof (GdkTimeCoord));
+  event_widget = gtk_get_event_widget (event);
+  controller_widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
   for (i = 0; i < n_coords; i++)
     {
       GdkTimeCoord *time_coord = &history[i];
@@ -339,8 +343,7 @@ gtk_gesture_stylus_get_backlog (GtkGestureStylus  *gesture,
 
       g_array_append_val (backlog_array, *time_coord);
       time_coord = &g_array_index (backlog_array, GdkTimeCoord, backlog_array->len - 1);
-      if (gtk_widget_compute_point (gtk_get_event_widget (event),
-                                    gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture)),
+      if (gtk_widget_compute_point (event_widget, controller_widget,
                                     &GRAPHENE_POINT_INIT (time_coord->axes[GDK_AXIS_X],
                                                           time_coord->axes[GDK_AXIS_Y]),
                                     &p))
