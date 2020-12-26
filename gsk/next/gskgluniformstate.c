@@ -187,8 +187,9 @@ get_uniform (GskGLUniformState  *state,
         {
           g_critical ("Attempt to access uniform with different type of value "
                       "than it was initialized with. Program %u Location %u. "
-                      "Was %d now %d.",
-                      program, location, info->format, format);
+                      "Was %d now %d (array length %d now %d).",
+                      program, location, info->format, format,
+                      info->array_count, array_count);
           *infoptr = NULL;
           return NULL;
         }
@@ -219,7 +220,7 @@ setup_info:
   info->changed = TRUE;
   info->format = format;
   info->offset = offset;
-  info->array_count = 0;
+  info->array_count = array_count;
 
   *infoptr = info;
 
