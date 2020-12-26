@@ -147,8 +147,39 @@ typedef struct _GskGLCommandBind
 
 G_STATIC_ASSERT (sizeof (GskGLCommandBind) == 4);
 
+typedef struct _GskGLCommandBatchAny
+{
+  /* A GskGLCommandKind indicating what the batch will do */
+  guint kind : 8;
+
+  /* The program's identifier to use for determining if we can merge two
+   * batches together into a single set of draw operations. We put this
+   * here instead of the GskGLCommandDraw so that we can use the extra
+   * bits here without making the structure larger.
+   */
+  guint program : 24;
+
+  /* The index of the next batch following this one. This is used
+   * as a sort of integer-based linked list to simplify out-of-order
+   * batching without moving memory around. -1 indicates last batch.
+   */
+  int next_batch_index;
+
+  /* The viewport size of the batch. We check this as we process
+   * batches to determine if we need to resize the viewport.
+   */
+  struct {
+    guint16 width;
+    guint16 height;
+  } viewport;
+} GskGLCommandBatchAny;
+
+G_STATIC_ASSERT (sizeof (GskGLCommandBatchAny) == 12);
+
 typedef struct _GskGLCommandDraw
 {
+  GskGLCommandBatchAny head;
+
   /* There doesn't seem to be a limit on the framebuffer identifier that
    * can be returned, so we have to use a whole unsigned for the framebuffer
    * we are drawing to. When processing batches, we check to see if this
@@ -189,7 +220,7 @@ typedef struct _GskGLCommandDraw
   guint bind_offset;
 } GskGLCommandDraw;
 
-G_STATIC_ASSERT (sizeof (GskGLCommandDraw) == 20);
+G_STATIC_ASSERT (sizeof (GskGLCommandDraw) == 32);
 
 typedef struct _GskGLCommandUniform
 {
@@ -199,48 +230,22 @@ typedef struct _GskGLCommandUniform
 
 G_STATIC_ASSERT (sizeof (GskGLCommandUniform) == 8);
 
-typedef struct _GskGLCommandBatch
+typedef union _GskGLCommandBatch
 {
-  /* The index of the next batch following this one. This is used
-   * as a sort of integer-based linked list to simplify out-of-order
-   * batching without moving memory around. -1 indicates last batch.
-   */
-  int next_batch_index;
-
-  /* The viewport size of the batch. We check this as we process
-   * batches to determine if we need to resize the viewport.
-   */
+  GskGLCommandBatchAny    any;
+  GskGLCommandDraw        draw;
   struct {
-    guint16 width;
-    guint16 height;
-  } viewport;
-
-  /* A GskGLCommandKind indicating what the batch will do */
-  guint kind : 8;
-
-  /* The program's identifier to use for determining if we can merge two
-   * batches together into a single set of draw operations. We put this
-   * here instead of the GskGLCommandDraw so that we can use the extra
-   * bits here without making the structure larger.
-   */
-  guint program : 24;
-
-  union {
-    /* Information about what to draw */
-    GskGLCommandDraw draw;
-
-    /* The message to apply when pushing a debug group */
-    const char *debug_group;
-
-    /* The bits to glClear() */
-    struct {
-      guint bits;
-      guint framebuffer;
-    } clear;
-  };
+    GskGLCommandBatchAny  any;
+    const char           *debug_group;
+  } debug_group;
+  struct {
+    GskGLCommandBatchAny  any;
+    guint bits;
+    guint framebuffer;
+  } clear;
 } GskGLCommandBatch;
 
-G_STATIC_ASSERT (sizeof (GskGLCommandBatch) == 40);
+G_STATIC_ASSERT (sizeof (GskGLCommandBatch) == 32);
 
 G_DEFINE_TYPE (GskGLCommandQueue, gsk_gl_command_queue, G_TYPE_OBJECT)
 
@@ -342,11 +347,11 @@ gsk_gl_command_queue_begin_draw (GskGLCommandQueue     *self,
   g_array_set_size (self->batches, self->batches->len + 1);
 
   batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
-  batch->kind = GSK_GL_COMMAND_KIND_DRAW;
-  batch->program = program;
-  batch->next_batch_index = -1;
-  batch->viewport.width = viewport->size.width;
-  batch->viewport.height = viewport->size.height;
+  batch->any.kind = GSK_GL_COMMAND_KIND_DRAW;
+  batch->any.program = program;
+  batch->any.next_batch_index = -1;
+  batch->any.viewport.width = viewport->size.width;
+  batch->any.viewport.height = viewport->size.height;
   batch->draw.framebuffer = 0;
   batch->draw.uniform_count = 0;
   batch->draw.uniform_offset = self->batch_uniforms->len;
@@ -384,7 +389,7 @@ gsk_gl_command_queue_end_draw (GskGLCommandQueue *self)
 
   batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
   
-  g_assert (batch->kind == GSK_GL_COMMAND_KIND_DRAW);
+  g_assert (batch->any.kind == GSK_GL_COMMAND_KIND_DRAW);
 
   /* Track the destination framebuffer in case it changed */
   batch->draw.framebuffer = self->attachments->fbo.id;
@@ -393,7 +398,7 @@ gsk_gl_command_queue_end_draw (GskGLCommandQueue *self)
   /* Track the list of uniforms that changed */
   batch->draw.uniform_offset = self->batch_uniforms->len;
   gsk_gl_uniform_state_snapshot (self->uniforms,
-                                 batch->program,
+                                 batch->any.program,
                                  gsk_gl_command_queue_uniform_snapshot_cb,
                                  self);
   batch->draw.uniform_count = self->batch_uniforms->len - batch->draw.uniform_offset;
@@ -423,7 +428,7 @@ gsk_gl_command_queue_end_draw (GskGLCommandQueue *self)
   if (self->tail_batch_index > -1)
     {
       GskGLCommandBatch *last_batch = &g_array_index (self->batches, GskGLCommandBatch, self->tail_batch_index);
-      last_batch->next_batch_index = self->batches->len - 1;
+      last_batch->any.next_batch_index = self->batches->len - 1;
     }
 
   self->tail_batch_index = self->batches->len - 1;
@@ -473,13 +478,13 @@ gsk_gl_command_queue_clear (GskGLCommandQueue     *self,
   g_array_set_size (self->batches, self->batches->len + 1);
 
   batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
-  batch->kind = GSK_GL_COMMAND_KIND_CLEAR;
-  batch->viewport.width = viewport->size.width;
-  batch->viewport.height = viewport->size.height;
+  batch->any.kind = GSK_GL_COMMAND_KIND_CLEAR;
+  batch->any.viewport.width = viewport->size.width;
+  batch->any.viewport.height = viewport->size.height;
   batch->clear.bits = clear_bits;
   batch->clear.framebuffer = self->attachments->fbo.id;
-  batch->next_batch_index = -1;
-  batch->program = 0;
+  batch->any.next_batch_index = -1;
+  batch->any.program = 0;
 
   self->attachments->fbo.changed = FALSE;
 }
@@ -497,10 +502,10 @@ gsk_gl_command_queue_push_debug_group (GskGLCommandQueue *self,
   g_array_set_size (self->batches, self->batches->len + 1);
 
   batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
-  batch->kind = GSK_GL_COMMAND_KIND_PUSH_DEBUG_GROUP;
-  batch->debug_group = g_string_chunk_insert (self->debug_groups, debug_group);
-  batch->next_batch_index = -1;
-  batch->program = 0;
+  batch->any.kind = GSK_GL_COMMAND_KIND_PUSH_DEBUG_GROUP;
+  batch->debug_group.debug_group = g_string_chunk_insert (self->debug_groups, debug_group);
+  batch->any.next_batch_index = -1;
+  batch->any.program = 0;
 }
 
 void
@@ -515,10 +520,10 @@ gsk_gl_command_queue_pop_debug_group (GskGLCommandQueue *self)
   g_array_set_size (self->batches, self->batches->len + 1);
 
   batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
-  batch->kind = GSK_GL_COMMAND_KIND_POP_DEBUG_GROUP;
-  batch->debug_group = NULL;
-  batch->next_batch_index = -1;
-  batch->program = 0;
+  batch->any.kind = GSK_GL_COMMAND_KIND_POP_DEBUG_GROUP;
+  batch->debug_group.debug_group = NULL;
+  batch->any.next_batch_index = -1;
+  batch->any.program = 0;
 }
 
 GdkGLContext *
@@ -869,7 +874,6 @@ apply_uniform (GskGLUniformState      *state,
 void
 gsk_gl_command_queue_execute (GskGLCommandQueue *self)
 {
-  graphene_rect_t viewport = GRAPHENE_RECT_INIT (0, 0, 0, 0);
   GLuint framebuffer = 0;
   GLuint vao_id;
   int next_batch_index;
@@ -918,7 +922,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
     {
       const GskGLCommandBatch *batch = &g_array_index (self->batches, GskGLCommandBatch, next_batch_index);
 
-      switch (batch->kind)
+      switch (batch->any.kind)
         {
         case GSK_GL_COMMAND_KIND_CLEAR:
           if (framebuffer != batch->clear.framebuffer)
@@ -927,15 +931,15 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
             }
 
-          if (width != batch->viewport.width ||
-              height != batch->viewport.height)
-            glViewport (0, 0, batch->viewport.width, batch->viewport.height);
+          if (width != batch->any.viewport.width ||
+              height != batch->any.viewport.height)
+            glViewport (0, 0, batch->any.viewport.width, batch->any.viewport.height);
 
           glClear (batch->clear.bits);
           break;
 
         case GSK_GL_COMMAND_KIND_PUSH_DEBUG_GROUP:
-          gdk_gl_context_push_debug_group (self->context, batch->debug_group);
+          gdk_gl_context_push_debug_group (self->context, batch->debug_group.debug_group);
           break;
 
         case GSK_GL_COMMAND_KIND_POP_DEBUG_GROUP:
@@ -949,9 +953,9 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
             }
 
-          if (width != batch->viewport.width ||
-              height != batch->viewport.height)
-            glViewport (0, 0, batch->viewport.width, batch->viewport.height);
+          if (width != batch->any.viewport.width ||
+              height != batch->any.viewport.height)
+            glViewport (0, 0, batch->any.viewport.width, batch->any.viewport.height);
 
           if (batch->draw.bind_count > 0)
             {
@@ -984,7 +988,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
           g_assert_not_reached ();
         }
 
-      next_batch_index = batch->next_batch_index;
+      next_batch_index = batch->any.next_batch_index;
     }
 
   glDeleteVertexArrays (1, &vao_id);
