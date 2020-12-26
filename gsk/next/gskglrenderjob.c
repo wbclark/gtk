@@ -532,7 +532,6 @@ gsk_gl_render_job_visit_node (GskGLRenderJob *job,
       program = job->driver->color;
 
       /* TODO: determine how we want to update mv/projection */
-      /* TODO: and how about change_viewport()? */
 
       gsk_gl_program_begin_draw (program, &job->viewport);
       gsk_gl_program_set_uniform_color (program,
