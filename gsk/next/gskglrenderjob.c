@@ -66,6 +66,7 @@ typedef struct _GskGLRenderModelview
   float scale_y;
   float offset_x_before;
   float offset_y_before;
+  graphene_matrix_t matrix;
 } GskGLRenderModelview;
 
 static void
@@ -88,15 +89,21 @@ init_projection_matrix (graphene_matrix_t     *projection,
 static inline GskGLRenderModelview *
 gsk_gl_render_job_get_modelview (GskGLRenderJob *job)
 {
-  return &g_array_index (job->modelview,
-                         GskGLRenderModelview,
-                         job->modelview->len - 1);
+  if (job->modelview->len > 0)
+    return &g_array_index (job->modelview,
+                           GskGLRenderModelview,
+                           job->modelview->len - 1);
+  else
+    return NULL;
 }
 
 static void
 extract_matrix_metadata (GskGLRenderModelview *modelview)
 {
   float dummy;
+  graphene_matrix_t m;
+
+  gsk_transform_to_matrix (modelview->transform, &modelview->matrix);
 
   switch (gsk_transform_get_category (modelview->transform))
     {
@@ -119,9 +126,6 @@ extract_matrix_metadata (GskGLRenderModelview *modelview)
       {
         graphene_vec3_t col1;
         graphene_vec3_t col2;
-        graphene_matrix_t m;
-
-        gsk_transform_to_matrix (modelview->transform, &m);
 
         /* TODO: 90% sure this is incorrect. But we should never hit this code
          * path anyway. */
@@ -313,9 +317,10 @@ gsk_gl_render_job_transform_bounds (GskGLRenderJob        *job,
   r.size.width = rect->size.width;
   r.size.height = rect->size.width;
 
-  modelview = gsk_gl_render_job_get_modelview (job);
-
-  gsk_transform_transform_bounds (modelview->transform, &r, out_rect);
+  if ((modelview = gsk_gl_render_job_get_modelview (job)))
+    gsk_transform_transform_bounds (modelview->transform, &r, out_rect);
+  else
+    g_critical ("Attempt to transform with NULL modelview");
 }
 
 GskGLRenderJob *
@@ -486,7 +491,7 @@ static void
 gsk_gl_render_job_visit_node (GskGLRenderJob *job,
                               GskRenderNode  *node)
 {
-  GskGLProgram *program;
+  GskGLRenderModelview *modelview;
 
   g_assert (job != NULL);
   g_assert (node != NULL);
@@ -496,6 +501,8 @@ gsk_gl_render_job_visit_node (GskGLRenderJob *job,
   if (node_is_invisible (node) ||
       !gsk_gl_render_job_node_overlaps_clip (job, node))
     return;
+
+  modelview = gsk_gl_render_job_get_modelview (job);
 
   switch (gsk_render_node_get_node_type (node))
     {
@@ -529,40 +536,41 @@ gsk_gl_render_job_visit_node (GskGLRenderJob *job,
     break;
 
     case GSK_COLOR_NODE:
-      program = job->driver->color;
+      g_assert (modelview != NULL);
 
-      /* TODO: determine how we want to update mv/projection */
-
-      gsk_gl_program_begin_draw (program, &job->viewport);
-      gsk_gl_program_set_uniform_color (program,
+      gsk_gl_program_begin_draw (job->driver->color,
+                                 &job->viewport,
+                                 &job->projection,
+                                 &modelview->matrix);
+      gsk_gl_program_set_uniform_color (job->driver->color,
                                         UNIFORM_COLOR_COLOR,
                                         gsk_color_node_get_color (node));
       gsk_gl_render_job_draw_rect (job, &node->bounds);
-      gsk_gl_program_end_draw (program);
+      gsk_gl_program_end_draw (job->driver->color);
     break;
 
-    case GSK_CAIRO_NODE:
-    case GSK_LINEAR_GRADIENT_NODE:
-    case GSK_REPEATING_LINEAR_GRADIENT_NODE:
-    case GSK_RADIAL_GRADIENT_NODE:
-    case GSK_REPEATING_RADIAL_GRADIENT_NODE:
-    case GSK_CONIC_GRADIENT_NODE:
+    case GSK_BLEND_NODE:
+    case GSK_BLUR_NODE:
     case GSK_BORDER_NODE:
-    case GSK_TEXTURE_NODE:
-    case GSK_INSET_SHADOW_NODE:
-    case GSK_OUTSET_SHADOW_NODE:
-    case GSK_TRANSFORM_NODE:
-    case GSK_OPACITY_NODE:
-    case GSK_COLOR_MATRIX_NODE:
-    case GSK_REPEAT_NODE:
+    case GSK_CAIRO_NODE:
     case GSK_CLIP_NODE:
+    case GSK_COLOR_MATRIX_NODE:
+    case GSK_CONIC_GRADIENT_NODE:
+    case GSK_CROSS_FADE_NODE:
+    case GSK_GL_SHADER_NODE:
+    case GSK_INSET_SHADOW_NODE:
+    case GSK_LINEAR_GRADIENT_NODE:
+    case GSK_OPACITY_NODE:
+    case GSK_OUTSET_SHADOW_NODE:
+    case GSK_RADIAL_GRADIENT_NODE:
+    case GSK_REPEATING_LINEAR_GRADIENT_NODE:
+    case GSK_REPEATING_RADIAL_GRADIENT_NODE:
+    case GSK_REPEAT_NODE:
     case GSK_ROUNDED_CLIP_NODE:
     case GSK_SHADOW_NODE:
-    case GSK_BLEND_NODE:
-    case GSK_CROSS_FADE_NODE:
+    case GSK_TEXTURE_NODE:
     case GSK_TEXT_NODE:
-    case GSK_BLUR_NODE:
-    case GSK_GL_SHADER_NODE:
+    case GSK_TRANSFORM_NODE:
     break;
 
     case GSK_NOT_A_RENDER_NODE:
@@ -570,8 +578,6 @@ gsk_gl_render_job_visit_node (GskGLRenderJob *job,
       g_assert_not_reached ();
     break;
     }
-
-
 }
 
 void

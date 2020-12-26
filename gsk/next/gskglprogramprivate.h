@@ -87,7 +87,9 @@ void             gsk_gl_program_set_uniform_rounded_rect (GskGLProgram          
                                                           guint                    key,
                                                           const GskRoundedRect    *rounded_rect);
 void             gsk_gl_program_begin_draw               (GskGLProgram            *self,
-                                                          const graphene_rect_t   *viewport);
+                                                          const graphene_rect_t   *viewport,
+                                                          const graphene_matrix_t *projection,
+                                                          const graphene_matrix_t *modelview);
 void             gsk_gl_program_end_draw                 (GskGLProgram            *self);
 
 G_END_DECLS

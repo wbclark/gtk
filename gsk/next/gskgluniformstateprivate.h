@@ -59,6 +59,7 @@ typedef void (*GskGLUniformStateCallback) (const GskGLUniformInfo *info,
 typedef enum _GskGLUniformFlags
 {
   GSK_GL_UNIFORM_FLAGS_SEND_CORNERS = 1 << 0,
+  GSK_GL_UNIFORM_FLAGS_MATRIX_SET   = 1 << 1,
 } GskGLUniformFlags;
 
 typedef enum _GskGLUniformKind

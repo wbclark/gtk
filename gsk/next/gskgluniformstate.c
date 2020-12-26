@@ -102,6 +102,8 @@ program_changed (GskGLUniformState *state,
   if (!info->changed)
     {
       info->changed = TRUE;
+      if (info->format == GSK_GL_UNIFORM_FORMAT_MATRIX)
+        info->flags |= GSK_GL_UNIFORM_FLAGS_MATRIX_SET;
       g_array_index (state->program_info, ProgramInfo, program).n_changed++;
     }
 }
@@ -486,15 +488,16 @@ gsk_gl_uniform_state_set_matrix (GskGLUniformState       *state,
 
   if ((u = get_uniform (state, program, GSK_GL_UNIFORM_FORMAT_MATRIX, 1, location, &info)))
     {
-      if (graphene_matrix_equal_fast (u, matrix))
-        return;
-
-      if (!graphene_matrix_equal (u, matrix))
+      if (info->flags & GSK_GL_UNIFORM_FLAGS_MATRIX_SET)
         {
-          REPLACE_UNIFORM (info, u, GSK_GL_UNIFORM_FORMAT_MATRIX, 1);
-          memcpy (u, matrix, sizeof *matrix);
-          program_changed (state, info, program);
+          if (graphene_matrix_equal_fast (u, matrix) ||
+              graphene_matrix_equal (u, matrix))
+            return;
         }
+
+      REPLACE_UNIFORM (info, u, GSK_GL_UNIFORM_FORMAT_MATRIX, 1);
+      memcpy (u, matrix, sizeof *matrix);
+      program_changed (state, info, program);
     }
 }
 
