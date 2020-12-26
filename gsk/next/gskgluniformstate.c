@@ -214,7 +214,9 @@ setup_info:
   if (location >= program_info->uniform_info->len)
     g_array_set_size (program_info->uniform_info, location + 1);
 
-  alloc_uniform_data (state->uniform_data, uniform_sizes[format] * array_count, &offset);
+  alloc_uniform_data (state->uniform_data,
+                      uniform_sizes[format] * MAX (1, array_count),
+                      &offset);
 
   info = &g_array_index (program_info->uniform_info, GskGLUniformInfo, location);
   info->changed = TRUE;
@@ -735,7 +737,7 @@ gsk_gl_uniform_state_end_frame (GskGLUniformState *state)
       for (guint j = 0; j < program_info->uniform_info->len; j++)
         {
           GskGLUniformInfo *info = &g_array_index (program_info->uniform_info, GskGLUniformInfo, j);
-          guint size = uniform_sizes[info->format] * info->array_count;
+          guint size = uniform_sizes[info->format] * MAX (1, info->array_count);
           guint offset;
 
           alloc_uniform_data (buffer, size, &offset);
