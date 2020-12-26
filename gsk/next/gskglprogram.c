@@ -32,6 +32,9 @@ struct _GskGLProgram
   char                 *name;
   GArray               *uniform_locations;
   GskGLCommandQueue   *command_queue;
+  int                  projection_location;
+  int                  modelview_location;
+  int                  viewport_location;
 };
 
 G_DEFINE_TYPE (GskGLProgram, gsk_gl_program, G_TYPE_OBJECT)
@@ -83,6 +86,9 @@ gsk_gl_program_init (GskGLProgram *self)
 {
   self->id = -1;
   self->uniform_locations = g_array_new (FALSE, TRUE, sizeof (GLint));
+  self->viewport_location = -1;
+  self->projection_location = -1;
+  self->modelview_location = -1;
 }
 
 /**
@@ -130,6 +136,13 @@ gsk_gl_program_add_uniform (GskGLProgram *self,
   while (key >= self->uniform_locations->len)
     g_array_append_val (self->uniform_locations, invalid);
   g_array_index (self->uniform_locations, GLint, key) = location;
+
+  if (key == UNIFORM_SHARED_MODELVIEW)
+    self->modelview_location = location;
+  else if (key == UNIFORM_SHARED_PROJECTION)
+    self->projection_location = location;
+  else if (key == UNIFORM_SHARED_VIEWPORT)
+    self->viewport_location = location;
 
   return TRUE;
 }
@@ -337,23 +350,34 @@ gsk_gl_program_set_uniform_matrix (GskGLProgram            *self,
 }
 
 void
-gsk_gl_program_begin_draw (GskGLProgram          *self,
-                           const graphene_rect_t *viewport)
+gsk_gl_program_begin_draw (GskGLProgram            *self,
+                           const graphene_rect_t   *viewport,
+                           const graphene_matrix_t *projection,
+                           const graphene_matrix_t *modelview)
 {
-  int viewport_location;
-
   g_assert (GSK_IS_GL_PROGRAM (self));
   g_assert (viewport != NULL);
 
-  viewport_location = get_uniform_location (self, UNIFORM_SHARED_VIEWPORT);
-  if (viewport_location >= 0)
+  if (self->viewport_location > -1)
     gsk_gl_command_queue_set_uniform4f (self->command_queue,
                                         self->id,
-                                        viewport_location,
+                                        self->viewport_location,
                                         viewport->origin.x,
                                         viewport->origin.y,
                                         viewport->size.width,
                                         viewport->size.height);
+
+  if (self->modelview_location > -1)
+    gsk_gl_command_queue_set_uniform_matrix (self->command_queue,
+                                             self->id,
+                                             self->modelview_location,
+                                             modelview);
+
+  if (self->projection_location > -1)
+    gsk_gl_command_queue_set_uniform_matrix (self->command_queue,
+                                             self->id,
+                                             self->projection_location,
+                                             projection);
 
   gsk_gl_command_queue_begin_draw (self->command_queue, self->id, viewport);
 }
