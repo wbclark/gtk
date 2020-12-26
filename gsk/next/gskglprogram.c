@@ -324,6 +324,19 @@ gsk_gl_program_set_uniform_rounded_rect (GskGLProgram         *self,
 }
 
 void
+gsk_gl_program_set_uniform_matrix (GskGLProgram            *self,
+                                   guint                    key,
+                                   const graphene_matrix_t *matrix)
+{
+  g_assert (GSK_IS_GL_PROGRAM (self));
+
+  gsk_gl_command_queue_set_uniform_matrix (self->command_queue,
+                                           self->id,
+                                           get_uniform_location (self, key),
+                                           matrix);
+}
+
+void
 gsk_gl_program_begin_draw (GskGLProgram          *self,
                            const graphene_rect_t *viewport)
 {
