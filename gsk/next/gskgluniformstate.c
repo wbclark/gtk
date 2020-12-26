@@ -159,6 +159,7 @@ get_uniform (GskGLUniformState  *state,
 {
   ProgramInfo *program_info;
   GskGLUniformInfo *info;
+  guint offset;
 
   g_assert (state != NULL);
   g_assert (program > 0);
@@ -174,6 +175,9 @@ get_uniform (GskGLUniformState  *state,
     {
       info = &g_array_index (program_info->uniform_info, GskGLUniformInfo, location);
 
+      if (info->format == 0)
+        goto setup_info;
+
       if G_LIKELY (format == info->format && array_count <= info->array_count)
         {
           *infoptr = info;
@@ -182,45 +186,44 @@ get_uniform (GskGLUniformState  *state,
       else
         {
           g_critical ("Attempt to access uniform with different type of value "
-                      "than it was initialized with. Program %u Location %u.",
-                      program, location);
+                      "than it was initialized with. Program %u Location %u. "
+                      "Was %d now %d.",
+                      program, location, info->format, format);
           *infoptr = NULL;
           return NULL;
         }
     }
-  else
+
+setup_info:
+
+  if (program >= state->program_info->len ||
+      g_array_index (state->program_info, ProgramInfo, program).uniform_info == NULL)
     {
-      guint offset;
+      if (program >= state->program_info->len)
+        g_array_set_size (state->program_info, program + 1);
 
-      if (program >= state->program_info->len ||
-          g_array_index (state->program_info, ProgramInfo, program).uniform_info == NULL)
-        {
-          if (program >= state->program_info->len)
-            g_array_set_size (state->program_info, program + 1);
-
-          program_info = &g_array_index (state->program_info, ProgramInfo, program);
-          program_info->uniform_info = g_array_new (FALSE, TRUE, sizeof (GskGLUniformInfo));
-          program_info->n_changed = 0;
-        }
-
-      g_assert (program_info != NULL);
-      g_assert (program_info->uniform_info != NULL);
-
-      if (location >= program_info->uniform_info->len)
-        g_array_set_size (program_info->uniform_info, location + 1);
-
-      alloc_uniform_data (state->uniform_data, uniform_sizes[format] * array_count, &offset);
-
-      info = &g_array_index (program_info->uniform_info, GskGLUniformInfo, location);
-      info->changed = TRUE;
-      info->format = format;
-      info->offset = offset;
-      info->array_count = 0;
-
-      *infoptr = info;
-
-      return state->uniform_data->data + offset;
+      program_info = &g_array_index (state->program_info, ProgramInfo, program);
+      program_info->uniform_info = g_array_new (FALSE, TRUE, sizeof (GskGLUniformInfo));
+      program_info->n_changed = 0;
     }
+
+  g_assert (program_info != NULL);
+  g_assert (program_info->uniform_info != NULL);
+
+  if (location >= program_info->uniform_info->len)
+    g_array_set_size (program_info->uniform_info, location + 1);
+
+  alloc_uniform_data (state->uniform_data, uniform_sizes[format] * array_count, &offset);
+
+  info = &g_array_index (program_info->uniform_info, GskGLUniformInfo, location);
+  info->changed = TRUE;
+  info->format = format;
+  info->offset = offset;
+  info->array_count = 0;
+
+  *infoptr = info;
+
+  return state->uniform_data->data + offset;
 }
 
 void
