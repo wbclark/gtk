@@ -333,6 +333,31 @@ gsk_gl_command_queue_new (GdkGLContext *context)
   return g_steal_pointer (&self);
 }
 
+static GskGLCommandBatch *
+begin_next_batch (GskGLCommandQueue *self)
+{
+  GskGLCommandBatch *batch;
+  guint index;
+
+  g_assert (GSK_IS_GL_COMMAND_QUEUE (self));
+
+  index = self->batches->len;
+  g_array_set_size (self->batches, index + 1);
+
+  if (self->tail_batch_index != -1)
+    {
+      batch = &g_array_index (self->batches, GskGLCommandBatch, self->tail_batch_index);
+      batch->any.next_batch_index = index;
+    }
+
+  batch = &g_array_index (self->batches, GskGLCommandBatch, index);
+  batch->any.next_batch_index = -1;
+
+  self->tail_batch_index = index;
+
+  return batch;
+}
+
 void
 gsk_gl_command_queue_begin_draw (GskGLCommandQueue     *self,
                                  guint                  program,
@@ -344,9 +369,7 @@ gsk_gl_command_queue_begin_draw (GskGLCommandQueue     *self,
   g_return_if_fail (self->in_draw == FALSE);
   g_return_if_fail (viewport != NULL);
 
-  g_array_set_size (self->batches, self->batches->len + 1);
-
-  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  batch = begin_next_batch (self);
   batch->any.kind = GSK_GL_COMMAND_KIND_DRAW;
   batch->any.program = program;
   batch->any.next_batch_index = -1;
@@ -427,14 +450,6 @@ gsk_gl_command_queue_end_draw (GskGLCommandQueue *self)
         }
     }
 
-  if (self->tail_batch_index > -1)
-    {
-      GskGLCommandBatch *last_batch = &g_array_index (self->batches, GskGLCommandBatch, self->tail_batch_index);
-      last_batch->any.next_batch_index = self->batches->len - 1;
-    }
-
-  self->tail_batch_index = self->batches->len - 1;
-
   self->in_draw = FALSE;
 }
 
@@ -477,9 +492,7 @@ gsk_gl_command_queue_clear (GskGLCommandQueue     *self,
   if (clear_bits == 0)
     clear_bits = GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT;
 
-  g_array_set_size (self->batches, self->batches->len + 1);
-
-  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  batch = begin_next_batch (self);
   batch->any.kind = GSK_GL_COMMAND_KIND_CLEAR;
   batch->any.viewport.width = viewport->size.width;
   batch->any.viewport.height = viewport->size.height;
@@ -501,9 +514,7 @@ gsk_gl_command_queue_push_debug_group (GskGLCommandQueue *self,
   g_return_if_fail (self->in_draw == FALSE);
   g_return_if_fail (self->batches->len < G_MAXINT);
 
-  g_array_set_size (self->batches, self->batches->len + 1);
-
-  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  batch = begin_next_batch (self);
   batch->any.kind = GSK_GL_COMMAND_KIND_PUSH_DEBUG_GROUP;
   batch->debug_group.debug_group = g_string_chunk_insert (self->debug_groups, debug_group);
   batch->any.next_batch_index = -1;
@@ -519,9 +530,7 @@ gsk_gl_command_queue_pop_debug_group (GskGLCommandQueue *self)
   g_return_if_fail (self->in_draw == FALSE);
   g_return_if_fail (self->batches->len < G_MAXINT);
 
-  g_array_set_size (self->batches, self->batches->len + 1);
-
-  batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
+  batch = begin_next_batch (self);
   batch->any.kind = GSK_GL_COMMAND_KIND_POP_DEBUG_GROUP;
   batch->debug_group.debug_group = NULL;
   batch->any.next_batch_index = -1;
@@ -926,6 +935,8 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
     {
       const GskGLCommandBatch *batch = &g_array_index (self->batches, GskGLCommandBatch, next_batch_index);
 
+      g_assert (batch->any.next_batch_index != next_batch_index);
+
       switch (batch->any.kind)
         {
         case GSK_GL_COMMAND_KIND_CLEAR:
@@ -940,15 +951,15 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
             glViewport (0, 0, batch->any.viewport.width, batch->any.viewport.height);
 
           glClear (batch->clear.bits);
-          break;
+        break;
 
         case GSK_GL_COMMAND_KIND_PUSH_DEBUG_GROUP:
           gdk_gl_context_push_debug_group (self->context, batch->debug_group.debug_group);
-          break;
+        break;
 
         case GSK_GL_COMMAND_KIND_POP_DEBUG_GROUP:
           gdk_gl_context_pop_debug_group (self->context);
-          break;
+        break;
 
         case GSK_GL_COMMAND_KIND_DRAW:
           if (batch->draw.framebuffer != framebuffer)
@@ -986,7 +997,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
 
           glDrawArrays (GL_TRIANGLES, batch->draw.vbo_offset, batch->draw.vbo_count);
 
-          break;
+        break;
 
         default:
           g_assert_not_reached ();
@@ -1056,6 +1067,7 @@ gsk_gl_command_queue_end_frame (GskGLCommandQueue *self)
   self->batch_binds->len = 0;
   self->autorelease_framebuffers->len = 0;
   self->autorelease_textures->len = 0;
+  self->tail_batch_index = -1;
 }
 
 gboolean
