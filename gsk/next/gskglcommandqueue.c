@@ -359,6 +359,8 @@ gsk_gl_command_queue_begin_draw (GskGLCommandQueue     *self,
   batch->draw.bind_offset = self->batch_binds->len;
   batch->draw.vbo_count = 0;
   batch->draw.vbo_offset = gsk_gl_buffer_get_offset (self->vertices);
+
+  self->in_draw = TRUE;
 }
 
 static void
