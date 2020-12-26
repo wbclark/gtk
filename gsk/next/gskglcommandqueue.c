@@ -1017,6 +1017,9 @@ gsk_gl_command_queue_begin_frame (GskGLCommandQueue *self)
 
   self->tail_batch_index = -1;
 
+  if (self->max_texture_size == -1)
+    glGetIntegerv (GL_MAX_TEXTURE_SIZE, &self->max_texture_size);
+
   glBindFramebuffer (GL_FRAMEBUFFER, 0);
 
   for (guint i = 0; i < 8; i++)
