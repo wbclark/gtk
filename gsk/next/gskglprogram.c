@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include "gskglcommandqueueprivate.h"
+#include "gskgldriverprivate.h"
 #include "gskglprogramprivate.h"
 #include "gskgluniformstateprivate.h"
 
@@ -323,11 +324,20 @@ gsk_gl_program_set_uniform_rounded_rect (GskGLProgram         *self,
 }
 
 void
-gsk_gl_program_begin_draw (GskGLProgram *self)
+gsk_gl_program_begin_draw (GskGLProgram          *self,
+                           const graphene_rect_t *viewport)
 {
   g_assert (GSK_IS_GL_PROGRAM (self));
+  g_assert (viewport != NULL);
 
-  return gsk_gl_command_queue_begin_draw (self->command_queue, self->id);
+  gsk_gl_command_queue_set_uniform4f (self->command_queue,
+                                      self->id,
+                                      get_uniform_location (self, UNIFORM_SHARED_VIEWPORT),
+                                      viewport->origin.x,
+                                      viewport->origin.y,
+                                      viewport->size.width,
+                                      viewport->size.height);
+  gsk_gl_command_queue_begin_draw (self->command_queue, self->id, viewport);
 }
 
 void
@@ -335,5 +345,5 @@ gsk_gl_program_end_draw (GskGLProgram *self)
 {
   g_assert (GSK_IS_GL_PROGRAM (self));
 
-  return gsk_gl_command_queue_end_draw (self->command_queue);
+  gsk_gl_command_queue_end_draw (self->command_queue);
 }

@@ -23,6 +23,7 @@
 #include <gdk/gdkglcontextprivate.h>
 #include <gsk/gskdebugprivate.h>
 #include <epoxy/gl.h>
+#include <string.h>
 
 #include "gskglattachmentstateprivate.h"
 #include "gskglbufferprivate.h"
@@ -206,6 +207,14 @@ typedef struct _GskGLCommandBatch
    */
   int next_batch_index;
 
+  /* The viewport size of the batch. We check this as we process
+   * batches to determine if we need to resize the viewport.
+   */
+  struct {
+    guint16 width;
+    guint16 height;
+  } viewport;
+
   /* A GskGLCommandKind indicating what the batch will do */
   guint kind : 8;
 
@@ -231,7 +240,7 @@ typedef struct _GskGLCommandBatch
   };
 } GskGLCommandBatch;
 
-G_STATIC_ASSERT (sizeof (GskGLCommandBatch) == 32);
+G_STATIC_ASSERT (sizeof (GskGLCommandBatch) == 40);
 
 G_DEFINE_TYPE (GskGLCommandQueue, gsk_gl_command_queue, G_TYPE_OBJECT)
 
@@ -320,13 +329,15 @@ gsk_gl_command_queue_new (GdkGLContext *context)
 }
 
 void
-gsk_gl_command_queue_begin_draw (GskGLCommandQueue *self,
-                                 guint              program)
+gsk_gl_command_queue_begin_draw (GskGLCommandQueue     *self,
+                                 guint                  program,
+                                 const graphene_rect_t *viewport)
 {
   GskGLCommandBatch *batch;
 
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
   g_return_if_fail (self->in_draw == FALSE);
+  g_return_if_fail (viewport != NULL);
 
   g_array_set_size (self->batches, self->batches->len + 1);
 
@@ -334,6 +345,8 @@ gsk_gl_command_queue_begin_draw (GskGLCommandQueue *self,
   batch->kind = GSK_GL_COMMAND_KIND_DRAW;
   batch->program = program;
   batch->next_batch_index = -1;
+  batch->viewport.width = viewport->size.width;
+  batch->viewport.height = viewport->size.height;
   batch->draw.framebuffer = 0;
   batch->draw.uniform_count = 0;
   batch->draw.uniform_offset = self->batch_uniforms->len;
@@ -444,8 +457,9 @@ gsk_gl_command_queue_add_vertices (GskGLCommandQueue     *self,
 }
 
 void
-gsk_gl_command_queue_clear (GskGLCommandQueue *self,
-                            guint              clear_bits)
+gsk_gl_command_queue_clear (GskGLCommandQueue     *self,
+                            guint                  clear_bits,
+                            const graphene_rect_t *viewport)
 {
   GskGLCommandBatch *batch;
 
@@ -460,6 +474,8 @@ gsk_gl_command_queue_clear (GskGLCommandQueue *self,
 
   batch = &g_array_index (self->batches, GskGLCommandBatch, self->batches->len - 1);
   batch->kind = GSK_GL_COMMAND_KIND_CLEAR;
+  batch->viewport.width = viewport->size.width;
+  batch->viewport.height = viewport->size.height;
   batch->clear.bits = clear_bits;
   batch->clear.framebuffer = self->attachments->fbo.id;
   batch->next_batch_index = -1;
@@ -853,9 +869,12 @@ apply_uniform (GskGLUniformState      *state,
 void
 gsk_gl_command_queue_execute (GskGLCommandQueue *self)
 {
+  graphene_rect_t viewport = GRAPHENE_RECT_INIT (0, 0, 0, 0);
   GLuint framebuffer = 0;
   GLuint vao_id;
   int next_batch_index;
+  guint16 width = 0;
+  guint16 height = 0;
 
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
   g_return_if_fail (self->in_draw == FALSE);
@@ -908,6 +927,10 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
             }
 
+          if (width != batch->viewport.width ||
+              height != batch->viewport.height)
+            glViewport (0, 0, batch->viewport.width, batch->viewport.height);
+
           glClear (batch->clear.bits);
           break;
 
@@ -925,6 +948,10 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
               framebuffer = batch->draw.framebuffer;
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
             }
+
+          if (width != batch->viewport.width ||
+              height != batch->viewport.height)
+            glViewport (0, 0, batch->viewport.width, batch->viewport.height);
 
           if (batch->draw.bind_count > 0)
             {
@@ -1021,16 +1048,6 @@ gsk_gl_command_queue_end_frame (GskGLCommandQueue *self)
   self->batch_binds->len = 0;
   self->autorelease_framebuffers->len = 0;
   self->autorelease_textures->len = 0;
-}
-
-void
-gsk_gl_command_queue_change_viewport (GskGLCommandQueue     *self,
-                                      const graphene_rect_t *viewport)
-{
-  g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
-  g_return_if_fail (viewport != NULL);
-
-  
 }
 
 gboolean

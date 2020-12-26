@@ -534,7 +534,7 @@ gsk_gl_render_job_visit_node (GskGLRenderJob *job,
       /* TODO: determine how we want to update mv/projection */
       /* TODO: and how about change_viewport()? */
 
-      gsk_gl_program_begin_draw (program);
+      gsk_gl_program_begin_draw (program, &job->viewport);
       gsk_gl_program_set_uniform_color (program,
                                         UNIFORM_COLOR_COLOR,
                                         gsk_color_node_get_color (node));
@@ -590,8 +590,7 @@ gsk_gl_render_job_render (GskGLRenderJob *job,
   gsk_next_driver_begin_frame (job->driver);
 
   gsk_gl_command_queue_bind_framebuffer (job->command_queue, job->framebuffer);
-  gsk_gl_command_queue_change_viewport (job->command_queue, &job->viewport);
-  gsk_gl_command_queue_clear (job->command_queue, 0);
+  gsk_gl_command_queue_clear (job->command_queue, 0, &job->viewport);
 
   gdk_gl_context_push_debug_group (context, "Building command queue");
   gsk_gl_render_job_visit_node (job, root);
