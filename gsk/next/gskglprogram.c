@@ -327,16 +327,21 @@ void
 gsk_gl_program_begin_draw (GskGLProgram          *self,
                            const graphene_rect_t *viewport)
 {
+  int viewport_location;
+
   g_assert (GSK_IS_GL_PROGRAM (self));
   g_assert (viewport != NULL);
 
-  gsk_gl_command_queue_set_uniform4f (self->command_queue,
-                                      self->id,
-                                      get_uniform_location (self, UNIFORM_SHARED_VIEWPORT),
-                                      viewport->origin.x,
-                                      viewport->origin.y,
-                                      viewport->size.width,
-                                      viewport->size.height);
+  viewport_location = get_uniform_location (self, UNIFORM_SHARED_VIEWPORT);
+  if (viewport_location >= 0)
+    gsk_gl_command_queue_set_uniform4f (self->command_queue,
+                                        self->id,
+                                        viewport_location,
+                                        viewport->origin.x,
+                                        viewport->origin.y,
+                                        viewport->size.width,
+                                        viewport->size.height);
+
   gsk_gl_command_queue_begin_draw (self->command_queue, self->id, viewport);
 }
 
