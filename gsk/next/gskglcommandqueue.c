@@ -698,6 +698,8 @@ gsk_gl_command_queue_set_uniform_matrix (GskGLCommandQueue       *self,
                                          const graphene_matrix_t *matrix)
 {
   g_return_if_fail (GSK_IS_GL_COMMAND_QUEUE (self));
+  g_return_if_fail (program > 0);
+  g_return_if_fail (matrix != NULL);
 
   gsk_gl_uniform_state_set_matrix (self->uniforms, program, location, matrix);
 }
