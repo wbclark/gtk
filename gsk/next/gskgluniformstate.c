@@ -37,6 +37,8 @@ typedef struct { int v0; int v1; int v2; } Uniform3i;
 typedef struct { int v0; int v1; int v2; int v3; } Uniform4i;
 
 static guint8 uniform_sizes[] = {
+  0,
+
   sizeof (Uniform1f),
   sizeof (Uniform2f),
   sizeof (Uniform3f),
