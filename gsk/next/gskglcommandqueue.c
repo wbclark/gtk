@@ -904,6 +904,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
   GLuint framebuffer = 0;
   GLuint vao_id;
   int next_batch_index;
+  guint program = 0;
   guint16 width = 0;
   guint16 height = 0;
 
@@ -974,6 +975,12 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
         break;
 
         case GSK_GL_COMMAND_KIND_DRAW:
+          if (batch->any.program != program)
+            {
+              program = batch->any.program;
+              glUseProgram (program);
+            }
+
           if (batch->draw.framebuffer != framebuffer)
             {
               framebuffer = batch->draw.framebuffer;
