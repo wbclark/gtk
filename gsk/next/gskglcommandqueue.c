@@ -944,6 +944,9 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
   /* Start with default framebuffer */
   glBindFramebuffer (GL_FRAMEBUFFER, 0);
 
+  /* Start without a scissor clip */
+  glDisable (GL_SCISSOR_TEST);
+
   next_batch_index = 0;
 
   while (next_batch_index >= 0)
