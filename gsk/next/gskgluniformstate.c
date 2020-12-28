@@ -99,11 +99,12 @@ program_changed (GskGLUniformState *state,
                  GskGLUniformInfo  *info,
                  guint              program)
 {
-  if (!info->changed)
+  if (info->changed == FALSE)
     {
       info->changed = TRUE;
       if (info->format == GSK_GL_UNIFORM_FORMAT_MATRIX)
         info->flags |= GSK_GL_UNIFORM_FLAGS_MATRIX_SET;
+      g_assert (program < state->program_info->len);
       g_array_index (state->program_info, ProgramInfo, program).n_changed++;
     }
 }
