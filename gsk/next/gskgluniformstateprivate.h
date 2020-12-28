@@ -36,7 +36,9 @@ typedef struct _GskGLUniformInfo
   guint changed : 1;
   guint format : 5;
   guint array_count : 6;
-  guint flags : 4;
+  guint initial : 1;
+  guint send_corners : 1;
+  guint unused : 2;
   guint offset : 16;
 } GskGLUniformInfo;
 
@@ -55,12 +57,6 @@ G_STATIC_ASSERT (sizeof (GskGLUniformInfo) == 4);
 typedef void (*GskGLUniformStateCallback) (const GskGLUniformInfo *info,
                                            guint                   location,
                                            gpointer                user_data);
-
-typedef enum _GskGLUniformFlags
-{
-  GSK_GL_UNIFORM_FLAGS_SEND_CORNERS = 1 << 0,
-  GSK_GL_UNIFORM_FLAGS_MATRIX_SET   = 1 << 1,
-} GskGLUniformFlags;
 
 typedef enum _GskGLUniformKind
 {

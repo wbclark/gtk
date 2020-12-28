@@ -867,7 +867,7 @@ apply_uniform (GskGLUniformState      *state,
       break;
 
     case GSK_GL_UNIFORM_FORMAT_ROUNDED_RECT:
-      if (info->flags & GSK_GL_UNIFORM_FLAGS_SEND_CORNERS)
+      if (info->send_corners)
         glUniform4fv (location, 3, (const float *)&data->rounded_rect[0]);
       else
         glUniform4fv (location, 1, (const float *)&data->rounded_rect[0]);

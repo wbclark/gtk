@@ -104,10 +104,11 @@ program_changed (GskGLUniformState *state,
 {
   if (info->changed == FALSE)
     {
-      info->changed = TRUE;
-      if (info->format == GSK_GL_UNIFORM_FORMAT_MATRIX)
-        info->flags |= GSK_GL_UNIFORM_FLAGS_MATRIX_SET;
       g_assert (program < state->program_info->len);
+
+      info->changed = TRUE;
+      info->initial = FALSE;
+
       g_array_index (state->program_info, ProgramInfo, program).n_changed++;
     }
 }
@@ -462,13 +463,13 @@ gsk_gl_uniform_state_set_rounded_rect (GskGLUniformState    *state,
         {
           REPLACE_UNIFORM (info, u, GSK_GL_UNIFORM_FORMAT_ROUNDED_RECT, 1);
 
-          if (!(info->flags & GSK_GL_UNIFORM_FLAGS_SEND_CORNERS))
+          if (!info->send_corners)
             {
               if (!graphene_size_equal (&u->corner[0], &rounded_rect->corner[0]) ||
                   !graphene_size_equal (&u->corner[1], &rounded_rect->corner[1]) ||
                   !graphene_size_equal (&u->corner[2], &rounded_rect->corner[2]) ||
                   !graphene_size_equal (&u->corner[3], &rounded_rect->corner[3]))
-                info->flags |= GSK_GL_UNIFORM_FLAGS_SEND_CORNERS;
+                info->send_corners = TRUE;
             }
 
           memcpy (u, rounded_rect, sizeof *rounded_rect);
@@ -492,7 +493,7 @@ gsk_gl_uniform_state_set_matrix (GskGLUniformState       *state,
 
   if ((u = get_uniform (state, program, GSK_GL_UNIFORM_FORMAT_MATRIX, 1, location, &info)))
     {
-      if (info->flags & GSK_GL_UNIFORM_FLAGS_MATRIX_SET)
+      if (!info->initial)
         {
           if (graphene_matrix_equal_fast (u, matrix) ||
               graphene_matrix_equal (u, matrix))
@@ -714,7 +715,7 @@ gsk_gl_uniform_state_snapshot (GskGLUniformState         *state,
       callback (info, i, user_data);
 
       info->changed = FALSE;
-      info->flags = 0;
+      info->send_corners = FALSE;
     }
 
   program_info->n_changed = 0;
