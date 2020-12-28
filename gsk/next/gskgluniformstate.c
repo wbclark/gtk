@@ -222,7 +222,7 @@ setup_info:
                       &offset);
 
   info = &g_array_index (program_info->uniform_info, GskGLUniformInfo, location);
-  info->changed = TRUE;
+  info->changed = FALSE;
   info->format = format;
   info->offset = offset;
   info->array_count = array_count;
