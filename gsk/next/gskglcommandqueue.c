@@ -1008,6 +1008,8 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
                   guint index = batch->draw.uniform_offset + i;
                   GskGLCommandUniform *u = &g_array_index (self->batch_uniforms, GskGLCommandUniform, index);
 
+                  g_assert (index < self->batch_uniforms->len);
+
                   apply_uniform (self->uniforms, &u->info, u->location);
                 }
             }

@@ -61,11 +61,12 @@ static guint8 uniform_sizes[] = {
   0,
 };
 
-#define REPLACE_UNIFORM(info, u, format, count)                                          \
-  G_STMT_START {                                                                         \
-    guint offset;                                                                        \
-    u = alloc_uniform_data(state->uniform_data, uniform_sizes[format] * count, &offset); \
-    (info)->offset = offset;                                                             \
+#define REPLACE_UNIFORM(info, u, format, count)                                                   \
+  G_STMT_START {                                                                                  \
+    guint offset;                                                                                 \
+    g_assert (uniform_sizes[format] > 0);                                                         \
+    u = alloc_uniform_data(state->uniform_data, uniform_sizes[format] * MAX (1, count), &offset); \
+    (info)->offset = offset;                                                                      \
   } G_STMT_END
 
 typedef struct
