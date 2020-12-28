@@ -961,7 +961,10 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
             }
 
-          apply_viewport (&width, &height, batch->any.viewport.width, batch->any.viewport.width);
+          apply_viewport (&width,
+                          &height,
+                          batch->any.viewport.width,
+                          batch->any.viewport.width);
 
           glClear (batch->clear.bits);
         break;
@@ -987,7 +990,10 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
             }
 
-          apply_viewport (&width, &height, batch->any.viewport.width, batch->any.viewport.width);
+          apply_viewport (&width,
+                          &height,
+                          batch->any.viewport.width,
+                          batch->any.viewport.width);
 
           if (batch->draw.bind_count > 0)
             {
