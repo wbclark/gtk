@@ -878,6 +878,20 @@ apply_uniform (GskGLUniformState      *state,
     }
 }
 
+static inline void
+apply_viewport (guint16 *current_width,
+                guint16 *current_height,
+                guint16 width,
+                guint16 height)
+{
+  if (*current_width != width || *current_height != height)
+    {
+      *current_width = width;
+      *current_height = height;
+      glViewport (0, 0, width, height);
+    }
+}
+
 /**
  * gsk_gl_command_queue_execute:
  * @self: a #GskGLCommandQueue
@@ -946,12 +960,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
             }
 
-          if (width != batch->any.viewport.width || height != batch->any.viewport.height)
-            {
-              width = batch->any.viewport.width;
-              height = batch->any.viewport.height;
-              glViewport (0, 0, width, height);
-            }
+          apply_viewport (&width, &height, batch->any.viewport.width, batch->any.viewport.width);
 
           glClear (batch->clear.bits);
         break;
@@ -971,12 +980,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
             }
 
-          if (width != batch->any.viewport.width || height != batch->any.viewport.height)
-            {
-              width = batch->any.viewport.width;
-              height = batch->any.viewport.height;
-              glViewport (0, 0, width, height);
-            }
+          apply_viewport (&width, &height, batch->any.viewport.width, batch->any.viewport.width);
 
           if (batch->draw.bind_count > 0)
             {
