@@ -1041,12 +1041,6 @@ gsk_gl_command_queue_begin_frame (GskGLCommandQueue *self)
 
   glBindFramebuffer (GL_FRAMEBUFFER, 0);
 
-  for (guint i = 0; i < 8; i++)
-    {
-      glActiveTexture (GL_TEXTURE0 + i);
-      glBindTexture (GL_TEXTURE_2D, 0);
-    }
-
   glBindVertexArray (0);
   glUseProgram (0);
 }
