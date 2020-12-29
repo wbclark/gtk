@@ -536,17 +536,26 @@ gsk_gl_render_job_visit_node (GskGLRenderJob *job,
     break;
 
     case GSK_COLOR_NODE:
-      g_assert (modelview != NULL);
+      {
+        GskGLRenderClip *clip = gsk_gl_render_job_get_clip (job);
 
-      gsk_gl_program_begin_draw (job->driver->color,
-                                 &job->viewport,
-                                 &job->projection,
-                                 &modelview->matrix);
-      gsk_gl_program_set_uniform_color (job->driver->color,
-                                        UNIFORM_COLOR_COLOR,
-                                        gsk_color_node_get_color (node));
-      gsk_gl_render_job_draw_rect (job, &node->bounds);
-      gsk_gl_program_end_draw (job->driver->color);
+        g_assert (modelview != NULL);
+        g_assert (g_str_equal (gsk_gl_program_get_name (job->driver->color), "color"));
+
+        gsk_gl_program_begin_draw (job->driver->color,
+                                   &job->viewport,
+                                   &job->projection,
+                                   &modelview->matrix);
+        if (clip != NULL)
+          gsk_gl_program_set_uniform_rounded_rect (job->driver->color,
+                                                   UNIFORM_SHARED_CLIP_RECT,
+                                                   &clip->rect);
+        gsk_gl_program_set_uniform_color (job->driver->color,
+                                          UNIFORM_COLOR_COLOR,
+                                          gsk_color_node_get_color (node));
+        gsk_gl_render_job_draw_rect (job, &node->bounds);
+        gsk_gl_program_end_draw (job->driver->color);
+      }
     break;
 
     case GSK_BLEND_NODE:
