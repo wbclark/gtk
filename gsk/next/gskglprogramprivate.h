@@ -32,6 +32,8 @@ G_DECLARE_FINAL_TYPE (GskGLProgram, gsk_gl_program, GSK, GL_PROGRAM, GObject)
 GskGLProgram    *gsk_gl_program_new                      (GskGLCommandQueue       *command_queue,
                                                           const char              *name,
                                                           int                      program_id);
+int              gsk_gl_program_get_id                   (GskGLProgram            *self);
+const char      *gsk_gl_program_get_name                 (GskGLProgram            *self);
 gboolean         gsk_gl_program_add_uniform              (GskGLProgram            *self,
                                                           const char              *name,
                                                           guint                    key);

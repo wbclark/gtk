@@ -56,6 +56,22 @@ gsk_gl_program_new (GskGLCommandQueue *command_queue,
   return self;
 }
 
+int
+gsk_gl_program_get_id (GskGLProgram *self)
+{
+  g_return_val_if_fail (GSK_IS_GL_PROGRAM (self), -1);
+
+  return self->id;
+}
+
+const char *
+gsk_gl_program_get_name (GskGLProgram *self)
+{
+  g_return_val_if_fail (GSK_IS_GL_PROGRAM (self), NULL);
+
+  return self->name;
+}
+
 static void
 gsk_gl_program_finalize (GObject *object)
 {
