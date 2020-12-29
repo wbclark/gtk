@@ -575,8 +575,7 @@ gsk_gl_compiler_compile (GskGLCompiler  *self,
                     g_bytes_get_size (self->all_preamble),
                     g_bytes_get_size (self->vertex_preamble),
                     g_bytes_get_size (self->vertex_source),
-                  0,
-                    //g_bytes_get_size (self->vertex_suffix),
+                    g_bytes_get_size (self->vertex_suffix),
                   });
   glCompileShader (vertex_id);
 
