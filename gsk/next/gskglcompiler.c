@@ -48,7 +48,7 @@ struct _GskGLCompiler
   GBytes *vertex_source;
   GBytes *vertex_suffix;
 
-  GHashTable *attrib_locations;
+  GArray *attrib_locations;
 
   int glsl_version;
 
@@ -57,6 +57,12 @@ struct _GskGLCompiler
   guint legacy : 1;
   guint debug_shaders : 1;
 };
+
+typedef struct _GskGLProgramAttrib
+{
+  const char *name;
+  guint       location;
+} GskGLProgramAttrib;
 
 static GBytes *empty_bytes;
 
@@ -74,7 +80,7 @@ gsk_gl_compiler_finalize (GObject *object)
   g_clear_pointer (&self->fragment_source, g_bytes_unref);
   g_clear_pointer (&self->fragment_suffix, g_bytes_unref);
   g_clear_pointer (&self->vertex_source, g_bytes_unref);
-  g_clear_pointer (&self->attrib_locations, g_hash_table_unref);
+  g_clear_pointer (&self->attrib_locations, g_array_unref);
   g_clear_object (&self->command_queue);
 
   G_OBJECT_CLASS (gsk_gl_compiler_parent_class)->finalize (object);
@@ -94,7 +100,7 @@ static void
 gsk_gl_compiler_init (GskGLCompiler *self)
 {
   self->glsl_version = 150;
-  self->attrib_locations = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+  self->attrib_locations = g_array_new (FALSE, FALSE, sizeof (GskGLProgramAttrib));
   self->all_preamble = g_bytes_ref (empty_bytes);
   self->vertex_preamble = g_bytes_ref (empty_bytes);
   self->fragment_preamble = g_bytes_ref (empty_bytes);
@@ -153,13 +159,16 @@ gsk_gl_compiler_bind_attribute (GskGLCompiler *self,
                                 const char    *name,
                                 guint          location)
 {
+  GskGLProgramAttrib attrib;
+
   g_return_if_fail (GSK_IS_GL_COMPILER (self));
   g_return_if_fail (name != NULL);
   g_return_if_fail (location < 32);
 
-  g_hash_table_insert (self->attrib_locations,
-                       g_strdup (name),
-                       GUINT_TO_POINTER (location));
+  attrib.name = g_intern_string (name);
+  attrib.location = location;
+
+  g_array_append_val (self->attrib_locations, attrib);
 }
 
 void
@@ -167,7 +176,7 @@ gsk_gl_compiler_clear_attributes (GskGLCompiler *self)
 {
   g_return_if_fail (GSK_IS_GL_COMPILER (self));
 
-  g_hash_table_remove_all (self->attrib_locations);
+  g_array_set_size (self->attrib_locations, 0);
 }
 
 void
@@ -518,9 +527,6 @@ gsk_gl_compiler_compile (GskGLCompiler  *self,
   const char *legacy = "";
   const char *gl3 = "";
   const char *gles = "";
-  const char *key;
-  gpointer value;
-  GHashTableIter iter;
   int program_id;
   int vertex_id;
   int fragment_id;
@@ -617,9 +623,15 @@ gsk_gl_compiler_compile (GskGLCompiler  *self,
   program_id = glCreateProgram ();
   glAttachShader (program_id, vertex_id);
   glAttachShader (program_id, fragment_id);
-  g_hash_table_iter_init (&iter, self->attrib_locations);
-  while (g_hash_table_iter_next (&iter, (gpointer *)&key, &value))
-    glBindAttribLocation (program_id, GPOINTER_TO_UINT (value), key);
+
+  for (guint i = 0; i < self->attrib_locations->len; i++)
+    {
+      const GskGLProgramAttrib *attrib;
+
+      attrib = &g_array_index (self->attrib_locations, GskGLProgramAttrib, i);
+      glBindAttribLocation (program_id, attrib->location, attrib->name);
+    }
+
   glLinkProgram (program_id);
 
   glGetProgramiv (program_id, GL_LINK_STATUS, &status);
