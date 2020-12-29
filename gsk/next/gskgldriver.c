@@ -94,7 +94,7 @@ gsk_next_driver_load_programs (GskNextDriver  *self,
 
   /* Setup attributes that are provided via VBO */
   gsk_gl_compiler_bind_attribute (compiler, "aPosition", 0);
-  gsk_gl_compiler_bind_attribute (compiler, "vUv", 1);
+  gsk_gl_compiler_bind_attribute (compiler, "aUv", 1);
 
   /* Use XMacros to register all of our programs and their uniforms */
 #define GSK_GL_NO_UNIFORMS
