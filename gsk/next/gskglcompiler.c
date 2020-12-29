@@ -622,10 +622,13 @@ gsk_gl_compiler_compile (GskGLCompiler  *self,
     glBindAttribLocation (program_id, GPOINTER_TO_UINT (value), key);
   glLinkProgram (program_id);
 
-  glDeleteShader (fragment_id);
+  glGetProgramiv (program_id, GL_LINK_STATUS, &status);
+
+  glDetachShader (program_id, vertex_id);
   glDeleteShader (vertex_id);
 
-  glGetProgramiv (program_id, GL_LINK_STATUS, &status);
+  glDetachShader (program_id, fragment_id);
+  glDeleteShader (fragment_id);
 
   if (status == GL_FALSE)
     {
