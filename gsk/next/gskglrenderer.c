@@ -74,7 +74,7 @@ gsk_next_renderer_realize (GskRenderer  *renderer,
   GdkGLContext *context = NULL;
   GskNextDriver *driver = NULL;
   gboolean ret = FALSE;
-  gboolean debug = FALSE;
+  gboolean debug_shaders = FALSE;
 
   g_assert (GSK_IS_NEXT_RENDERER (self));
   g_assert (GDK_IS_SURFACE (surface));
@@ -89,10 +89,10 @@ gsk_next_renderer_realize (GskRenderer  *renderer,
 
 #ifdef G_ENABLE_DEBUG
   if (GSK_RENDERER_DEBUG_CHECK (GSK_RENDERER (self), SHADERS))
-    debug = TRUE;
+    debug_shaders = TRUE;
 #endif
 
-  if (!(driver = gsk_next_driver_new (command_queue, debug, error)))
+  if (!(driver = gsk_next_driver_new (command_queue, debug_shaders, error)))
     goto failure;
 
   self->command_queue = g_steal_pointer (&command_queue);
