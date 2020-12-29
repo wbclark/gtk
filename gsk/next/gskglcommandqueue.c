@@ -941,9 +941,6 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
                          sizeof (GskGLDrawVertex),
                          (void *) G_STRUCT_OFFSET (GskGLDrawVertex, uv));
 
-  /* Start with default framebuffer */
-  glBindFramebuffer (GL_FRAMEBUFFER, 0);
-
   /* Start without a scissor clip */
   glDisable (GL_SCISSOR_TEST);
 
@@ -958,7 +955,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
       switch (batch->any.kind)
         {
         case GSK_GL_COMMAND_KIND_CLEAR:
-          if (framebuffer != batch->clear.framebuffer)
+          if G_UNLIKELY (framebuffer != batch->clear.framebuffer)
             {
               framebuffer = batch->clear.framebuffer;
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
@@ -1045,13 +1042,8 @@ gsk_gl_command_queue_begin_frame (GskGLCommandQueue *self)
 
   self->tail_batch_index = -1;
 
-  if (self->max_texture_size == -1)
+  if G_UNLIKELY (self->max_texture_size == -1)
     glGetIntegerv (GL_MAX_TEXTURE_SIZE, &self->max_texture_size);
-
-  glBindFramebuffer (GL_FRAMEBUFFER, 0);
-
-  glBindVertexArray (0);
-  glUseProgram (0);
 }
 
 /**
