@@ -266,6 +266,9 @@ gsk_gl_compiler_set_source (GskGLCompiler     *self,
       GBytes *fragment_bytes;
       GBytes *vertex_bytes;
 
+      g_clear_pointer (&self->fragment_source, g_bytes_unref);
+      g_clear_pointer (&self->vertex_source, g_bytes_unref);
+
       source = g_bytes_get_data (source_bytes, &len);
       endpos = source + len;
       vertex_shader_start = g_strstr_len (source, len, "VERTEX_SHADER");
