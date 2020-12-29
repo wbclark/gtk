@@ -594,7 +594,9 @@ gsk_gl_render_job_render (GskGLRenderJob *job,
 
   gsk_next_driver_begin_frame (job->driver);
 
-  gsk_gl_command_queue_bind_framebuffer (job->command_queue, job->framebuffer);
+  if (job->framebuffer != 0)
+    gsk_gl_command_queue_bind_framebuffer (job->command_queue, job->framebuffer);
+
   gsk_gl_command_queue_clear (job->command_queue, 0, &job->viewport);
 
   gdk_gl_context_push_debug_group (context, "Building command queue");
