@@ -987,7 +987,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
               glUseProgram (program);
             }
 
-          if (batch->draw.framebuffer != framebuffer)
+          if G_UNLIKELY (batch->draw.framebuffer != framebuffer)
             {
               framebuffer = batch->draw.framebuffer;
               glBindFramebuffer (GL_FRAMEBUFFER, framebuffer);
@@ -998,7 +998,7 @@ gsk_gl_command_queue_execute (GskGLCommandQueue *self)
                           batch->any.viewport.width,
                           batch->any.viewport.width);
 
-          if (batch->draw.bind_count > 0)
+          if G_UNLIKELY (batch->draw.bind_count > 0)
             {
               for (guint i = 0; i < batch->draw.bind_count; i++)
                 {
